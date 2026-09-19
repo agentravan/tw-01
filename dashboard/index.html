@@ -3,7 +3,7 @@
 <main>
 <section class="hero"><div><h2>Autonomous business-development control center</h2><p>Research → qualify → outreach → follow-up → meeting → proposal → revenue</p></div><div><button id="stop">EMERGENCY STOP</button><button id="resume">Resume</button></div></section>
 <section id="cards" class="grid"></section>
-<section class="panel"><h2>AI Command</h2><div class="row"><input id="command" placeholder="Show today's hot leads"><button id="run">Run</button></div><pre id="output"></pre></section>
+<section class="panel"><h2>AI Command</h2><div class="row"><input id="command" placeholder="Show today's hot leads"><button id="run">Run</button><button id="cycle">Run Full Sales Cycle</button></div><pre id="output"></pre></section>
 <section class="panel"><h2>Import / Research Leads</h2><p class="muted">Paste a JSON array of public business information. No private-data scraping is performed.</p><textarea id="leadJson" rows="8" placeholder='[{"company_name":"ABC Pvt Ltd","industry":"Manufacturing","location":"Gurugram","source":"public-website","source_url":"https://example.com","estimated_employee_count":80,"contact_name":"HR Manager","email":"hr@example.com","possible_hr_problem":"Payroll compliance"}]'></textarea><button id="import">Import & Score</button><button id="researchUrl">Research URL</button><input id="sourceUrl" placeholder="https://public-company-page.example"><pre id="researchOutput"></pre></section>
 <section class="panel"><h2>Pipeline</h2><div id="leads">Loading…</div></section>
 <section class="panel"><h2>Follow-ups Due</h2><button id="followups">Refresh Due Follow-ups</button><div id="due"></div></section>
