@@ -43,3 +43,26 @@ Open `http://localhost:3000`. The included PWA is responsive for Android and des
 Research, analysis, drafts and learning can run automatically. Outbound communication, calls, high-volume outreach, contracts, payments, and irreversible actions require approval. The emergency stop disables all outbound channels and follow-ups. Do not record meetings without appropriate consent.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md), [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), and [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Phase 2 — end-to-end sales engine
+
+TW-01 now includes an integrated workflow for:
+
+1. Public-source lead intake and URL research
+2. Deterministic lead scoring and qualification
+3. CRM pipeline management
+4. Email/WhatsApp/call draft generation
+5. Human approval records for outbound actions
+6. Follow-up scheduling and due-follow-up detection
+7. Meeting briefs
+8. Won-client recurring/one-time revenue tracking
+9. Learning memory and versioned skills
+10. A daily sales cycle that qualifies leads and prepares follow-up approvals without sending messages automatically
+
+### Local AI
+
+If Ollama is running locally, TW-01 can use its local HTTP API for outreach drafting. If Ollama is unavailable, the system falls back to deterministic templates. The default local endpoint is http://127.0.0.1:11434.
+
+### Important operating boundary
+
+The core is free-first, but production email delivery, WhatsApp Business messaging, telephony and calendar integrations depend on the provider credentials and policies you choose. TW-01 never reports an external message or call as delivered when the adapter is not configured. Public-source research must respect source terms, robots rules, privacy, consent and applicable law.
