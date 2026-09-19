@@ -41,7 +41,7 @@ export class SalesEngine {
     await this.store.update(s=>s.revenue.push({id:this.store.id(),lead_id:id,company_name:lead.company_name,monthly_recurring:monthlyRecurring,one_time:oneTime,won_at:new Date().toISOString()}));
     return lead;
   }
-  async dashboard(){
+  async approvals(){return (await this.store.load()).approvals;}\n  async dashboard(){
     const s=await this.store.load(); const leads=s.leads;
     return {totalLeads:leads.length,qualifiedLeads:leads.filter(x=>['QUALIFIED','HOT'].includes(x.status)).length,hotLeads:leads.filter(x=>x.status==='HOT').length,replies:leads.filter(x=>x.status==='REPLIED').length,meetings:leads.filter(x=>x.status==='MEETING_BOOKED').length,proposals:leads.filter(x=>x.status==='PROPOSAL').length,wonClients:leads.filter(x=>x.status==='WON').length,followupsDue:leads.filter(x=>x.status==='FOLLOW_UP').length,paused:s.settings.paused,emergencyStop:s.settings.emergencyStop,
       revenue:s.revenue.reduce((a,x)=>a+x.monthly_recurring+x.one_time,0),
