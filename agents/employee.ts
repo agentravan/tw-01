@@ -28,6 +28,7 @@ export class AIEmployee {
     if(steps[0]==='list_hot_leads')return{status:'WORKING',leads:await this.crm.list('HOT')};
     if(steps[0]==='list_followups')return{status:'WORKING',leads:(await this.crm.list()).filter(x=>x.status==='FOLLOW_UP')};
     if(steps[0]==='revenue_report')return{status:'WORKING',dashboard:await this.sales.dashboard()};
+    if(steps[0]==='run_cycle')return await this.sales.runCycle();
     return{status:'WORKING',steps,message:'Plan created; use the dedicated API actions for execution. External actions remain approval-gated.'};
   }
   async dashboard(){return this.sales.dashboard()}
