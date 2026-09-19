@@ -35,6 +35,8 @@ const server=createServer(async(req,res)=>{
     if(url.pathname==='/api/revenue/won'&&req.method==='POST'){const b=await body(req);return json(res,await sales.won(String(b.id),Number(b.monthly_recurring||0),Number(b.one_time||0)));}
     if(url.pathname==='/api/learning'&&req.method==='POST'){const b=await body(req);return json(res,await sales.learning.learn(String(b.text||''),String(b.source||'manual')));}
     if(url.pathname==='/api/approvals')return json(res,await sales.approvals());
+    if(url.pathname==='/api/approvals/approve'&&req.method==='POST'){const b=await body(req);return json(res,await sales.approve(String(b.id)));}
+    if(url.pathname==='/api/approvals/execute'&&req.method==='POST'){const b=await body(req);return json(res,await sales.executeApproved(String(b.id)));}
     if(url.pathname.startsWith('/api/'))return json(res,{error:'not found'},404);
     const file=url.pathname==='/'?'/dashboard/index.html':url.pathname;
     const content=await readFile(new URL(`..${file}`,import.meta.url));
