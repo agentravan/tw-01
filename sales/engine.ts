@@ -5,6 +5,7 @@ import { ResearchEngine, type ResearchCandidate } from './research.js';
 import { OutreachEngine } from './outreach.js';
 import { meetingBrief } from './meeting.js';
 import { LearningEngine } from './learning.js';
+import { SmtpAdapter, WhatsAppAdapter, VoiceAdapter } from '../integrations/adapters.js';
 
 export class SalesEngine {
   crm=new CRM(); research=new ResearchEngine(this.crm); outreach=new OutreachEngine();
@@ -41,7 +42,17 @@ export class SalesEngine {
     await this.store.update(s=>s.revenue.push({id:this.store.id(),lead_id:id,company_name:lead.company_name,monthly_recurring:monthlyRecurring,one_time:oneTime,won_at:new Date().toISOString()}));
     return lead;
   }
-  async approvals(){return (await this.store.load()).approvals;}\n  async dashboard(){
+  async approvals(){return (await this.store.load()).approvals;}
+  async approve(id:string){let result:any;await this.store.update(s=>{const a=s.approvals.find(x=>x.id===id);if(!a)throw new Error('Approval not found');a.status='APPROVED';a.decided_at=new Date().toISOString();result=a;});return result;}
+  async executeApproved(id:string){
+    const s=await this.store.load(); const a=s.approvals.find(x=>x.id===id); if(!a)throw new Error('Approval not found'); if(a.status!=='APPROVED')throw new Error('Approval must be APPROVED first');
+    if(s.settings.emergencyStop||(s.settings.paused&&['outreach','call','whatsapp','meeting'].includes(a.action)))return{status:'DISABLED'};
+    const lead=s.leads.find(x=>x.id===a.lead_id); if(!lead)throw new Error('Lead not found');
+    const adapter=a.action==='outreach'?new SmtpAdapter():a.action==='whatsapp'?new WhatsAppAdapter():new VoiceAdapter();
+    const result=await adapter.send({lead,description:a.description});
+    await this.store.update(x=>x.activities.push({id:this.store.id(),lead_id:lead.id,kind:a.action==='call'?'CALL':a.action==='whatsapp'?'WHATSAPP':'OUTREACH_SENT',channel:adapter.name,summary:JSON.stringify(result),created_at:new Date().toISOString()}));
+    return result;
+  }\n  async dashboard(){
     const s=await this.store.load(); const leads=s.leads;
     return {totalLeads:leads.length,qualifiedLeads:leads.filter(x=>['QUALIFIED','HOT'].includes(x.status)).length,hotLeads:leads.filter(x=>x.status==='HOT').length,replies:leads.filter(x=>x.status==='REPLIED').length,meetings:leads.filter(x=>x.status==='MEETING_BOOKED').length,proposals:leads.filter(x=>x.status==='PROPOSAL').length,wonClients:leads.filter(x=>x.status==='WON').length,followupsDue:leads.filter(x=>x.status==='FOLLOW_UP').length,paused:s.settings.paused,emergencyStop:s.settings.emergencyStop,
       revenue:s.revenue.reduce((a,x)=>a+x.monthly_recurring+x.one_time,0),
