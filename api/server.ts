@@ -24,6 +24,7 @@ const server=createServer(async(req,res)=>{
     if(url.pathname==='/api/stop'&&req.method==='POST'){await safety.emergencyStop();return json(res,{status:'DISABLED'});}
     if(url.pathname==='/api/resume'&&req.method==='POST'){await safety.resume();return json(res,{status:'WORKING'});}
     if(url.pathname==='/api/command'&&req.method==='POST'){const b=await body(req);return json(res,await employee.command(b.command||''));}
+    if(url.pathname==='/api/cycle'&&req.method==='POST')return json(res,await sales.runCycle());
     if(url.pathname==='/api/research/import'&&req.method==='POST'){const b=await body(req);return json(res,{leads:await sales.importLeads(Array.isArray(b.items)?b.items:[])});}
     if(url.pathname==='/api/research/url'&&req.method==='POST'){const b=await body(req);return json(res,await sales.research.researchUrl(String(b.url||'')));}
     if(url.pathname==='/api/lead/qualify'&&req.method==='POST'){const b=await body(req);return json(res,await sales.qualify(String(b.id)));}
