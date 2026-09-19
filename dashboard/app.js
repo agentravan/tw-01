@@ -6,6 +6,7 @@ async function refresh(){
  const leads=await api('/api/leads');
  $('#leads').innerHTML=leads.length?leads.map(x=>`<article class="lead"><div><strong>${esc(x.company_name)}</strong> <span class="pill">${esc(x.status)}</span> <span class="score">${esc(x.lead_score)}</span></div><div>${esc(x.industry)} · ${esc(x.location)} · ${esc(x.contact_name||'No contact')}</div><small>${esc(x.possible_hr_problem||'Problem not yet verified')}</small><div class="actions"><button data-act="qualify" data-id="${esc(x.id)}">Qualify</button><button data-act="email" data-id="${esc(x.id)}">Draft Email</button><button data-act="wa" data-id="${esc(x.id)}">Draft WhatsApp</button><button data-act="brief" data-id="${esc(x.id)}">Meeting Brief</button><button data-act="follow" data-id="${esc(x.id)}">Follow-up +3d</button></div></article>`).join(''):'No leads yet.';
 }
+$('#cycle').onclick=async()=>{try{$('#output').textContent=JSON.stringify(await api('/api/cycle',{method:'POST'}),null,2);await refresh()}catch(e){$('#output').textContent=e.message}};
 $('#run').onclick=async()=>{try{$('#output').textContent=JSON.stringify(await api('/api/command',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({command:$('#command').value})}),null,2);await refresh()}catch(e){$('#output').textContent=e.message}};
 $('#stop').onclick=async()=>{await api('/api/stop',{method:'POST'});await refresh()};
 $('#resume').onclick=async()=>{await api('/api/resume',{method:'POST'});await refresh()};
