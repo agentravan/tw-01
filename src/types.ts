@@ -5,7 +5,7 @@ export interface Lead { id:string; company_name:string; website?:string; industr
 export interface AuditEvent { id:string; timestamp:string; agent:string; task:string; tool:string; result?:unknown; error?:string; retry:number; approval?:string; status:Status; }
 export interface SkillVersion { id:string; name:string; version:number; content:string; change_reason:string; created_at:string; }
 export interface MemoryItem { id:string; kind:string; text:string; tags:string[]; source?:string; created_at:string; }
-export interface Approval { id:string; action:ActionKind; description:string; status:'PENDING'|'APPROVED'|'REJECTED'; created_at:string; decided_at?:string; }
+export interface Approval { id:string; action:ActionKind; lead_id?:string; description:string; status:'PENDING'|'APPROVED'|'REJECTED'; created_at:string; decided_at?:string; }
 export interface Mission { date:string; lead_target:number; research_target:number; followup_target:number; meeting_target:number; learning_target:number; report:Record<string,number>; }
 export interface Activity { id:string; lead_id?:string; kind:'RESEARCH'|'OUTREACH_DRAFT'|'OUTREACH_SENT'|'REPLY'|'FOLLOW_UP'|'CALL'|'WHATSAPP'|'MEETING'|'NOTE'; channel?:string; summary:string; created_at:string; }
 export interface RevenueRecord { id:string; lead_id:string; company_name:string; monthly_recurring:number; one_time:number; won_at:string; }
