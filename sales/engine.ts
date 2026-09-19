@@ -43,7 +43,7 @@ export class SalesEngine {
   }
   async dashboard(){
     const s=await this.store.load(); const leads=s.leads;
-    return {...await (new (await import('../agents/employee.js')).AIEmployee(this.store)).dashboard(),
+    return {totalLeads:leads.length,qualifiedLeads:leads.filter(x=>['QUALIFIED','HOT'].includes(x.status)).length,hotLeads:leads.filter(x=>x.status==='HOT').length,replies:leads.filter(x=>x.status==='REPLIED').length,meetings:leads.filter(x=>x.status==='MEETING_BOOKED').length,proposals:leads.filter(x=>x.status==='PROPOSAL').length,wonClients:leads.filter(x=>x.status==='WON').length,followupsDue:leads.filter(x=>x.status==='FOLLOW_UP').length,paused:s.settings.paused,emergencyStop:s.settings.emergencyStop,
       revenue:s.revenue.reduce((a,x)=>a+x.monthly_recurring+x.one_time,0),
       recurringRevenue:s.revenue.reduce((a,x)=>a+x.monthly_recurring,0),
       pipelineValue:s.revenue.reduce((a,x)=>a+x.monthly_recurring*12+x.one_time,0),
