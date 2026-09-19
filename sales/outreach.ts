@@ -15,7 +15,7 @@ export class OutreachEngine {
     return {lead_id:lead.id,channel,subject:channel==='email'?'HR & Payroll Support for '+lead.company_name:undefined,body,created_at:new Date().toISOString()};
   }
   async requestApproval(lead:Lead,action:ActionKind,description:string){
-    const approval:Approval={id:this.store.id(),action,description,status:'PENDING',created_at:new Date().toISOString()};
+    const approval:Approval={id:this.store.id(),action,lead_id:lead.id,description,status:'PENDING',created_at:new Date().toISOString()};
     await this.store.update(s=>s.approvals.push(approval));
     return approval;
   }
