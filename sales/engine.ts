@@ -42,6 +42,13 @@ export class SalesEngine {
     await this.store.update(s=>s.revenue.push({id:this.store.id(),lead_id:id,company_name:lead.company_name,monthly_recurring:monthlyRecurring,one_time:oneTime,won_at:new Date().toISOString()}));
     return lead;
   }
+  async runCycle(){
+    const leads=await this.crm.list(); let qualified=0,drafts=0; const due=await this.followupsDue();
+    for(const lead of leads.filter(x=>['NEW','RESEARCHED'].includes(x.status))){await this.qualify(lead.id);qualified++;}
+    for(const lead of due){const pending=(await this.approvals()).some(a=>a.status==='PENDING'&&a.lead_id===lead.id&&a.action==='outreach');if(!pending){await this.requestOutreach(lead.id,'email');drafts++;}}
+    await this.learning.learn(`Cycle completed: qualified ${qualified} leads; prepared ${drafts} follow-up outreach approvals.`,'cycle');
+    return {status:'WORKING',qualified,drafts,followupsDue:due.length};
+  }
   async approvals(){return (await this.store.load()).approvals;}
   async approve(id:string){let result:any;await this.store.update(s=>{const a=s.approvals.find(x=>x.id===id);if(!a)throw new Error('Approval not found');a.status='APPROVED';a.decided_at=new Date().toISOString();result=a;});return result;}
   async executeApproved(id:string){
