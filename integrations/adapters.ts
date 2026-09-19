@@ -1,0 +1,7 @@
+import type { ActionKind } from '../src/types.js';
+export interface Adapter {name:string; action:ActionKind; status():Promise<string>; send(input:unknown):Promise<unknown>}
+const configured=(...v:string[])=>v.every(Boolean);
+export class SmtpAdapter implements Adapter{name='smtp';action='outreach' as ActionKind;async status(){return configured(process.env.SMTP_HOST||'',process.env.SMTP_USER||'',process.env.SMTP_PASSWORD||'')?'CONNECTED':'NOT_CONFIGURED'}async send(){if(await this.status()!=='CONNECTED')return{status:'NOT_CONFIGURED'};return{status:'CONNECTED',note:'SMTP transport contract ready; configure a mailer implementation before production use'}}}
+export class WhatsAppAdapter implements Adapter{name='whatsapp-business-api';action='whatsapp' as ActionKind;async status(){return configured(process.env.WHATSAPP_API_URL||'',process.env.WHATSAPP_ACCESS_TOKEN||'',process.env.WHATSAPP_PHONE_NUMBER_ID||'')?'CONNECTED':'NOT_CONFIGURED'}async send(){return{status:await this.status()}}}
+export class VoiceAdapter implements Adapter{name='voice';action='call' as ActionKind;async status(){return process.env.VOICE_PROVIDER_URL?'CONNECTED':'NOT_CONFIGURED'}async send(){return{status:await this.status(),note:'No calls are faked'}}}
+export class CalendarAdapter implements Adapter{name='calendar';action='meeting' as ActionKind;async status(){return process.env.CALENDAR_ICS_URL?'CONNECTED':'NOT_CONFIGURED'}async send(){return{status:await this.status()}}}

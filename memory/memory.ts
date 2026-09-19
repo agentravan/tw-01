@@ -1,0 +1,2 @@
+import { JsonStore } from './store.js';
+export class Memory { constructor(private store=new JsonStore()){} async add(text:string,kind='fact',tags:string[]=[],source?:string){const s=await this.store.update(x=>x.memory.push({id:this.store.id(),text,kind,tags,source,created_at:new Date().toISOString()}));return s.memory.at(-1)} async search(q:string){const s=await this.store.load();const terms=q.toLowerCase().split(/\s+/).filter(Boolean);return s.memory.filter(x=>terms.every(t=>(x.text+' '+x.tags.join(' ')).toLowerCase().includes(t)))} }
