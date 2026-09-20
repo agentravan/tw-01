@@ -50,17 +50,38 @@ export class SalesEngine {
     return lead;
   }
   async runCycle(){
-    const leads=await this.crm.list(); let discovered=0,qualified=0,drafts=0; const due=await this.followupsDue();
+    let leads=await this.crm.list(); let discovered=0,qualified=0,drafts=0,sent=0; const due=await this.followupsDue();
     if(process.env.TW01_AUTO_DISCOVERY!=='false'){
       try{
         const result=await this.discover({location:process.env.TW01_TARGET_LOCATION||'Gurugram',industries:(process.env.TW01_TARGET_INDUSTRIES||'Manufacturing,Hospitals,Logistics,Schools,BPO,Facility').split(',').map(x=>x.trim()).filter(Boolean),minEmployees:Number(process.env.TW01_MIN_EMPLOYEES||20),maxEmployees:Number(process.env.TW01_MAX_EMPLOYEES||150),limit:Number(process.env.TW01_DISCOVERY_LIMIT||5)});
         discovered=result.leads.length;
       }catch(error){await this.learning.learn(`Discovery skipped: ${String(error)}`,'discovery-error');}
     }
+    leads=await this.crm.list();
     for(const lead of leads.filter(x=>['NEW','RESEARCHED'].includes(x.status))){await this.qualify(lead.id);qualified++;}
-    for(const lead of due){const pending=(await this.approvals()).some(a=>a.status==='PENDING'&&a.lead_id===lead.id&&a.action==='outreach');if(!pending){await this.requestOutreach(lead.id,'email');drafts++;}}
-    await this.learning.learn(`Cycle completed: qualified ${qualified} leads; prepared ${drafts} follow-up outreach approvals.`,'cycle');
-    return {status:'WORKING',discovered,qualified,drafts,followupsDue:due.length};
+    leads=await this.crm.list();
+    const autoOutreach=process.env.TW01_AUTONOMOUS_OUTREACH==='true';
+    let outreachSlots=autoOutreach?Number(process.env.TW01_OUTREACH_PER_CYCLE||1):0;
+    const candidates=leads.filter(x=>(['HOT','QUALIFIED'].includes(x.status)||due.some(d=>d.id===x.id))&&!['CONTACTED','REPLIED','INTERESTED','MEETING_BOOKED','PROPOSAL','WON','LOST'].includes(x.status)&&x.email&&!x.opt_out);
+    for(const lead of candidates){
+      if(outreachSlots<=0)break;
+      const pending=(await this.approvals()).find(a=>a.status==='PENDING'&&a.lead_id===lead.id&&a.action==='outreach');
+      if(pending)continue;
+      const req=await this.requestOutreach(lead.id,'email'); drafts++;
+      if(autoOutreach){
+        await this.approve(req.approval.id);
+        const result=await this.executeApproved(req.approval.id);
+        if((result as any)?.status==='SENT')sent++;
+        outreachSlots--;
+      }
+    }
+    for(const lead of due){
+      if(leads.some(x=>x.id===lead.id&&['CONTACTED','REPLIED','INTERESTED','MEETING_BOOKED','PROPOSAL','WON','LOST'].includes(x.status)))continue;
+      const pending=(await this.approvals()).some(a=>a.status==='PENDING'&&a.lead_id===lead.id&&a.action==='outreach');
+      if(!pending && !autoOutreach){await this.requestOutreach(lead.id,'email');drafts++;}
+    }
+    await this.learning.learn(`Cycle completed: discovered ${discovered}; qualified ${qualified}; prepared ${drafts} outreach items; sent ${sent}.`,'cycle');
+    return {status:'WORKING',discovered,qualified,drafts,sent,followupsDue:due.length};
   }
   async approvals(){return (await this.store.load()).approvals;}
   async approve(id:string){let result:any;await this.store.update(s=>{const a=s.approvals.find(x=>x.id===id);if(!a)throw new Error('Approval not found');a.status='APPROVED';a.decided_at=new Date().toISOString();result=a;});return result;}
