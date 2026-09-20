@@ -18,7 +18,7 @@ export class SmtpAdapter implements Adapter {
       host:process.env.SMTP_HOST,
       port:Number(process.env.SMTP_PORT||587),
       secure:String(process.env.SMTP_SECURE||'false')==='true',
-      auth:{user:process.env.SMTP_USER,password:process.env.SMTP_PASSWORD}
+      auth:{user:process.env.SMTP_USER,pass:process.env.SMTP_PASSWORD}
     });
     const subject=(process.env.SMTP_SUBJECT_PREFIX||'Team Work Solutions')+' | '+lead.company_name;
     const info=await transporter.sendMail({
