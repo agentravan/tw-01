@@ -46,7 +46,7 @@ const server=createServer(async(req,res)=>{
   }catch(e){json(res,{error:String(e)},500);}
 });
 const port=Number(process.env.PORT||3000);
-server.listen(port,()=>{
+server.listen(port,'0.0.0.0',()=>{
   console.log(`TW-01 listening on http://localhost:${port}`);
   if(process.env.TW01_AUTO_RUN!=='false'){
     const hours=Math.max(1,Number(process.env.TW01_CYCLE_HOURS||6));
