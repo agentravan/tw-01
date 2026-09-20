@@ -24,13 +24,13 @@ export class DiscoveryEngine {
     const html=await res.text();
     const candidates:ResearchCandidate[]=[];
     const seen=new Set<string>();
-    const links=[...html.matchAll(/<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\\s\\S]*?)<\\/a>/gi)];
+    const links=[...html.matchAll(/<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\\/a>/gi)];
     for(const match of links.slice(0,config.limit*2)){
       const href=this.normalizeUrl(this.clean(match[1]));
       const title=this.clean(match[2]);
       if(!href||!/^https?:\/\//i.test(href)) continue;
       let domain:string;
-      try{domain=new URL(href).hostname.replace(/^www\\./,'')}catch{continue;}
+      try{domain=new URL(href).hostname.replace(/^www\./,'')}catch{continue;}
       if(seen.has(domain))continue;
       seen.add(domain);
       const context=(title+' '+domain).toLowerCase();
