@@ -59,7 +59,8 @@ export class SalesEngine {
     const result=await adapter.send({lead,description:a.description});
     await this.store.update(x=>x.activities.push({id:this.store.id(),lead_id:lead.id,kind:a.action==='call'?'CALL':a.action==='whatsapp'?'WHATSAPP':'OUTREACH_SENT',channel:adapter.name,summary:JSON.stringify(result),created_at:new Date().toISOString()}));
     return result;
-  }\n  async dashboard(){
+  }
+  async dashboard(){
     const s=await this.store.load(); const leads=s.leads;
     return {totalLeads:leads.length,qualifiedLeads:leads.filter(x=>['QUALIFIED','HOT'].includes(x.status)).length,hotLeads:leads.filter(x=>x.status==='HOT').length,replies:leads.filter(x=>x.status==='REPLIED').length,meetings:leads.filter(x=>x.status==='MEETING_BOOKED').length,proposals:leads.filter(x=>x.status==='PROPOSAL').length,wonClients:leads.filter(x=>x.status==='WON').length,followupsDue:leads.filter(x=>x.status==='FOLLOW_UP').length,paused:s.settings.paused,emergencyStop:s.settings.emergencyStop,
       revenue:s.revenue.reduce((a,x)=>a+x.monthly_recurring+x.one_time,0),
