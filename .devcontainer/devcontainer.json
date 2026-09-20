@@ -1,0 +1,13 @@
+{
+  "name": "TW-01 AI Employee",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:1-20-bookworm",
+  "forwardPorts": [3000],
+  "portsAttributes": {
+    "3000": {
+      "label": "TW-01 Dashboard",
+      "onAutoForward": "notify",
+      "visibility": "private"
+    }
+  },
+  "postCreateCommand": "npm install"
+}
