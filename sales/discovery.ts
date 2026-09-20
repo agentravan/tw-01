@@ -26,9 +26,9 @@ export class DiscoveryEngine {
     const seen=new Set<string>();
     const links=[...html.matchAll(/<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\\s\\S]*?)<\\/a>/gi)];
     for(const match of links.slice(0,config.limit*2)){
-      const href=this.clean(match[1]);
+      const href=this.normalizeUrl(this.clean(match[1]));
       const title=this.clean(match[2]);
-      if(!href||!/^https?:\\/\\//i.test(href)) continue;
+      if(!href||!/^https?:\/\//i.test(href)) continue;
       let domain:string;
       try{domain=new URL(href).hostname.replace(/^www\\./,'')}catch{continue;}
       if(seen.has(domain))continue;
@@ -48,6 +48,14 @@ export class DiscoveryEngine {
     }
     return {query,candidates,results:candidates.length};
   }
-  private clean(v:string){return v.replace(/<[^>]+>/g,' ').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/\\s+/g,' ').trim();}
-  private companyName(title:string,domain:string){return title.replace(/\\s*[|–—-]\\s*.*$/,'').trim()||domain.split('.')[0];}
+  private clean(v:string){return v.replace(/<[^>]+>/g,' ').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/\s+/g,' ').trim();}
+  private normalizeUrl(v:string){
+    if(v.startsWith('//')) v='https:'+v;
+    try{
+      const u=new URL(v);
+      const target=u.searchParams.get('uddg');
+      return target?decodeURIComponent(target):u.toString();
+    }catch{return v;}
+  }
+  private companyName(title:string,domain:string){return title.replace(/\s*[|–—-]\s*.*$/,'').trim()||domain.split('.')[0];}
 }
