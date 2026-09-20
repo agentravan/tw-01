@@ -5,9 +5,10 @@ import { AIEmployee } from '../agents/employee.js';
 import { CRM } from '../crm/crm.js';
 import { Safety } from '../tools/safety.js';
 import { SalesEngine } from '../sales/engine.js';
+import { AgentFactory } from '../agents/factory.js';
 
 const employee=new AIEmployee(); await employee.initialize();
-const crm=new CRM(); const safety=new Safety(); const sales=new SalesEngine();
+const crm=new CRM(); const safety=new Safety(); const sales=new SalesEngine(); const factory=new AgentFactory();
 
 const json=(res:any,data:any,status=200)=>{res.writeHead(status,{'content-type':'application/json','access-control-allow-origin':'*','access-control-allow-methods':'GET,POST,OPTIONS','access-control-allow-headers':'content-type,authorization'});res.end(JSON.stringify(data));};
 const body=async(req:any)=>{let raw='';for await(const chunk of req)raw+=chunk;return raw?JSON.parse(raw):{};};
@@ -26,6 +27,7 @@ const server=createServer(async(req,res)=>{
     if(url.pathname==='/api/command'&&req.method==='POST'){const b=await body(req);return json(res,await employee.command(b.command||''));}
     if(url.pathname==='/api/cycle'&&req.method==='POST')return json(res,await sales.runCycle());
     if(url.pathname==='/api/discover'&&req.method==='POST'){const b=await body(req);return json(res,await sales.discover({location:String(b.location||process.env.TW01_TARGET_LOCATION||'Gurugram'),industries:Array.isArray(b.industries)?b.industries:(process.env.TW01_TARGET_INDUSTRIES||'Manufacturing,Hospitals,Logistics,Schools,BPO,Facility').split(',').map(x=>x.trim()),minEmployees:Number(b.minEmployees||process.env.TW01_MIN_EMPLOYEES||20),maxEmployees:Number(b.maxEmployees||process.env.TW01_MAX_EMPLOYEES||150),limit:Number(b.limit||process.env.TW01_DISCOVERY_LIMIT||5)}));}
+    if(url.pathname==='/api/agent-factory'&&req.method==='POST'){const b=await body(req);if(!String(b.name||'').trim()||!String(b.goal||'').trim())return json(res,{error:'name and goal are required'},400);return json(res,await factory.build({name:String(b.name),goal:String(b.goal),inputs:Array.isArray(b.inputs)?b.inputs.map(String):undefined,outputs:Array.isArray(b.outputs)?b.outputs.map(String):undefined,tools:Array.isArray(b.tools)?b.tools.map(String):undefined,schedule:b.schedule?String(b.schedule):undefined}));}
     if(url.pathname==='/api/research/import'&&req.method==='POST'){const b=await body(req);return json(res,{leads:await sales.importLeads(Array.isArray(b.items)?b.items:[])});}
     if(url.pathname==='/api/research/url'&&req.method==='POST'){const b=await body(req);return json(res,await sales.research.researchUrl(String(b.url||'')));}
     if(url.pathname==='/api/lead/qualify'&&req.method==='POST'){const b=await body(req);return json(res,await sales.qualify(String(b.id)));}
