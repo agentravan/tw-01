@@ -50,6 +50,7 @@ server.listen(port,()=>{
   console.log(`TW-01 listening on http://localhost:${port}`);
   if(process.env.TW01_AUTO_RUN!=='false'){
     const hours=Math.max(1,Number(process.env.TW01_CYCLE_HOURS||6));
+    sales.runCycle().then(result=>console.log('TW-01 initial autonomous cycle',result)).catch(error=>console.error('TW-01 initial cycle error',error));
     setInterval(()=>sales.runCycle().catch(error=>console.error('TW-01 cycle error',error)),hours*60*60*1000);
     console.log(`TW-01 autonomous cycle enabled every ${hours}h`);
   }
