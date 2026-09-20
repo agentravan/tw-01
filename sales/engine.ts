@@ -5,12 +5,19 @@ import { ResearchEngine, type ResearchCandidate } from './research.js';
 import { OutreachEngine } from './outreach.js';
 import { meetingBrief } from './meeting.js';
 import { LearningEngine } from './learning.js';
+import { DiscoveryEngine, type DiscoveryConfig } from './discovery.js';
 import { SmtpAdapter, WhatsAppAdapter, VoiceAdapter } from '../integrations/adapters.js';
 
 export class SalesEngine {
-  crm=new CRM(); research=new ResearchEngine(this.crm); outreach=new OutreachEngine();
+  crm=new CRM(); research=new ResearchEngine(this.crm); discovery=new DiscoveryEngine(); outreach=new OutreachEngine();
   learning=new LearningEngine(); constructor(private store=new JsonStore()){}
   async importLeads(items:ResearchCandidate[]){return this.research.importCandidates(items)}
+  async discover(config:DiscoveryConfig){
+    const result=await this.discovery.discover(config);
+    const leads=await this.importLeads(result.candidates);
+    await this.learning.learn(`Public discovery found ${leads.length} new prospects for ${config.location}.`,'discovery');
+    return {...result,leads};
+  }
   async draftOutreach(id:string,channel:'email'|'whatsapp'|'call'='email'){
     const lead=(await this.crm.list()).find(x=>x.id===id); if(!lead) throw new Error('Lead not found');
     return this.outreach.draft(lead,channel);
@@ -43,11 +50,17 @@ export class SalesEngine {
     return lead;
   }
   async runCycle(){
-    const leads=await this.crm.list(); let qualified=0,drafts=0; const due=await this.followupsDue();
+    const leads=await this.crm.list(); let discovered=0,qualified=0,drafts=0; const due=await this.followupsDue();
+    if(process.env.TW01_AUTO_DISCOVERY!=='false'){
+      try{
+        const result=await this.discover({location:process.env.TW01_TARGET_LOCATION||'Gurugram',industries:(process.env.TW01_TARGET_INDUSTRIES||'Manufacturing,Hospitals,Logistics,Schools,BPO,Facility').split(',').map(x=>x.trim()).filter(Boolean),minEmployees:Number(process.env.TW01_MIN_EMPLOYEES||20),maxEmployees:Number(process.env.TW01_MAX_EMPLOYEES||150),limit:Number(process.env.TW01_DISCOVERY_LIMIT||5)});
+        discovered=result.leads.length;
+      }catch(error){await this.learning.learn(`Discovery skipped: ${String(error)}`,'discovery-error');}
+    }
     for(const lead of leads.filter(x=>['NEW','RESEARCHED'].includes(x.status))){await this.qualify(lead.id);qualified++;}
     for(const lead of due){const pending=(await this.approvals()).some(a=>a.status==='PENDING'&&a.lead_id===lead.id&&a.action==='outreach');if(!pending){await this.requestOutreach(lead.id,'email');drafts++;}}
     await this.learning.learn(`Cycle completed: qualified ${qualified} leads; prepared ${drafts} follow-up outreach approvals.`,'cycle');
-    return {status:'WORKING',qualified,drafts,followupsDue:due.length};
+    return {status:'WORKING',discovered,qualified,drafts,followupsDue:due.length};
   }
   async approvals(){return (await this.store.load()).approvals;}
   async approve(id:string){let result:any;await this.store.update(s=>{const a=s.approvals.find(x=>x.id===id);if(!a)throw new Error('Approval not found');a.status='APPROVED';a.decided_at=new Date().toISOString();result=a;});return result;}
