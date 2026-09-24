@@ -5,7 +5,7 @@ let snapshot=null,selected=null;
 const statusClass=s=>String(s||'').toLowerCase().replaceAll('_','-');
 function employeeCard(e){
  const task=snapshot.tasks.find(t=>t.id===e.currentTaskId);
- return `<button class="employeeCard ${statusClass(e.status)}" data-employee="${esc(e.id)}"><div class="employeeTop"><strong>${esc(e.name)}</strong><span class="status ${statusClass(e.status)}">${esc(e.status)}</span></div><div class="role">${esc(e.role)}</div><div class="current">${task?esc(task.goal):'No active task'}</div><div class="meta">Heartbeat: ${e.lastHeartbeat?new Date(e.lastHeartbeat).toLocaleTimeString('en-IN'):'—'} · Health: ${esc(e.health)}</div>`;
+ return `<button class="employeeCard ${statusClass(e.status)}" data-employee="${esc(e.id)}"><div class="employeeTop"><strong>${esc(e.name)}</strong><span class="status ${statusClass(e.status)}">${esc(e.status)}</span></div><div class="role">${esc(e.role)}</div><div class="current">${task?esc(task.goal):'No active task'}</div><div class="meta">Heartbeat: ${e.lastHeartbeat?new Date(e.lastHeartbeat).toLocaleTimeString('en-IN'):'—'} · Health: ${esc(e.health)}</div></button>`;
 }
 function render(){
  const es=snapshot?.employees||[], ts=snapshot?.tasks||[], ev=snapshot?.events||[];
