@@ -1,10 +1,15 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0f172a"><link rel="manifest" href="/dashboard/manifest.webmanifest"><link rel="stylesheet" href="/dashboard/style.css"><title>TW-01 — Team Work AI Employee</title></head><body>
-<header><h1>TW-01</h1><span>Team Work AI Employee · Sales & HR Business Engine</span></header>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b1220"><link rel="manifest" href="/dashboard/manifest.webmanifest"><link rel="stylesheet" href="/dashboard/style.css"><title>TW-01 — AI Employee Control Room</title></head><body>
+<header><div><h1>TW-01</h1><span>AI Employee Control Room · Team Work</span></div><div id="connection">Checking runtime…</div></header>
 <main>
-<section class="hero"><div><h2>Autonomous business-development control center</h2><p>Research → qualify → outreach → follow-up → meeting → proposal → revenue</p></div><div><button id="stop">EMERGENCY STOP</button><button id="resume">Resume</button></div></section>
-<section id="cards" class="grid"></section><section class="panel"><h2>🔴 Live AI Work Monitor</h2><p class="muted">This window shows the build roadmap and latest repository activity. It refreshes automatically.</p><div id="workStatus"></div><h3>Latest activity</h3><div id="commitFeed">Loading…</div></section>
-<section class="panel"><h2>AI Workforce</h2><div id="workforce">Loading…</div></section><section class="panel"><h2>Business Portfolio</h2><div class="row"><input id="businessName" placeholder="New business name"><input id="businessHypothesis" placeholder="Business hypothesis"><input id="businessBudget" type="number" placeholder="Test budget"><button id="createBusiness">Create Test</button><button id="reviewBusinesses">Review Strategy</button></div><div id="businesses">Loading…</div></section><section class="panel"><h2>Executive Report</h2><button id="dailyReport">Generate Report</button><pre id="dailyReportOutput"></pre></section><section class="panel"><h2>AI Command</h2><div class="row"><input id="command" placeholder="Show today's hot leads"><button id="run">Run</button><button id="cycle">Run Full Sales Cycle</button></div><pre id="output"></pre></section>
-<section class="panel"><h2>Import / Research Leads</h2><p class="muted">Paste a JSON array of public business information. No private-data scraping is performed.</p><textarea id="leadJson" rows="8" placeholder='[{"company_name":"ABC Pvt Ltd","industry":"Manufacturing","location":"Gurugram","source":"public-website","source_url":"https://example.com","estimated_employee_count":80,"contact_name":"HR Manager","email":"hr@example.com","possible_hr_problem":"Payroll compliance"}]'></textarea><button id="import">Import & Score</button><button id="researchUrl">Research URL</button><input id="sourceUrl" placeholder="https://public-company-page.example"><pre id="researchOutput"></pre></section>
-<section class="panel"><h2>Pipeline</h2><div id="leads">Loading…</div></section>
-<section class="panel"><h2>Follow-ups Due</h2><button id="followups">Refresh Due Follow-ups</button><div id="due"></div></section>
-</main><script type="module" src="/dashboard/app.js"></script></body></html>
+<section class="hero"><div><h2>Company Command Center</h2><p>Watch every AI employee, task, run, heartbeat, handoff and result from one screen.</p></div><div><button id="refreshControl">Refresh</button><button id="stop">EMERGENCY STOP</button></div></section>
+<section class="grid" id="kpis"></section>
+<section class="panel"><div class="sectionHead"><div><h2>👥 AI Employee Fleet</h2><p class="muted">WORKING is shown only when a live run/heartbeat exists.</p></div></div><div id="employees" class="employeeGrid"></div></section>
+<section class="panel"><div class="sectionHead"><h2>📋 Live Task Center</h2><button id="newTask">+ New Task</button></div><div id="tasks"></div></section>
+<section class="panel"><h2>⚡ Live Work Timeline</h2><div id="events"></div></section>
+<section class="panel"><h2>🔎 Employee Detail</h2><div id="detail" class="empty">Select an employee above.</div></section>
+<section class="panel"><h2>🏢 Organization</h2><div id="org"></div></section>
+<section class="panel"><h2>📈 Business Portfolio</h2><div id="businesses">Loading…</div></section>
+<section class="panel"><h2>📊 Executive Daily Report</h2><button id="dailyReport">Generate Report</button><pre id="dailyReportOutput"></pre></section>
+<section class="panel"><h2>🛑 Safety</h2><button id="resume">Resume System</button><div id="safety"></div></section>
+</main>
+<script type="module" src="/dashboard/app.js"></script></body></html>
