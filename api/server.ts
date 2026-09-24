@@ -6,6 +6,7 @@ import { CRM } from '../crm/crm.js';
 import { Safety } from '../tools/safety.js';
 import { SalesEngine } from '../sales/engine.js';
 import { AgentFactory } from '../agents/factory.js';
+import { BusinessOS } from '../strategy/business-os.js';
 
 const employee=new AIEmployee(); await employee.initialize();
 const crm=new CRM(); const safety=new Safety(); const sales=new SalesEngine(); const factory=new AgentFactory();
@@ -27,6 +28,10 @@ const server=createServer(async(req,res)=>{
     if(url.pathname==='/api/command'&&req.method==='POST'){const b=await body(req);return json(res,await employee.command(b.command||''));}
     if(url.pathname==='/api/cycle'&&req.method==='POST')return json(res,await sales.runCycle());
     if(url.pathname==='/api/discover'&&req.method==='POST'){const b=await body(req);return json(res,await sales.discover({location:String(b.location||process.env.TW01_TARGET_LOCATION||'Gurugram'),industries:Array.isArray(b.industries)?b.industries:(process.env.TW01_TARGET_INDUSTRIES||'Manufacturing,Hospitals,Logistics,Schools,BPO,Facility').split(',').map(x=>x.trim()),minEmployees:Number(b.minEmployees||process.env.TW01_MIN_EMPLOYEES||20),maxEmployees:Number(b.maxEmployees||process.env.TW01_MAX_EMPLOYEES||150),limit:Number(b.limit||process.env.TW01_DISCOVERY_LIMIT||5)}));}
+    if(url.pathname==='/api/businesses'&&req.method==='GET')return json(res,await businessOS.portfolio());
+    if(url.pathname==='/api/businesses'&&req.method==='POST'){const b=await body(req);if(!String(b.name||'').trim()||!String(b.hypothesis||'').trim())return json(res,{error:'name and hypothesis are required'},400);return json(res,await businessOS.createIdea({name:String(b.name),hypothesis:String(b.hypothesis),budget:Number(b.budget||10000),maxLoss:b.maxLoss==null?undefined:Number(b.maxLoss)}));}
+    if(url.pathname==='/api/businesses/metric'&&req.method==='POST'){const b=await body(req);return json(res,await businessOS.addMetric(String(b.businessId||''),{revenue:Number(b.revenue||0),direct_cost:Number(b.direct_cost||0),operating_cost:Number(b.operating_cost||0),acquisition_cost:Number(b.acquisition_cost||0),conversions:Number(b.conversions||0),customers:Number(b.customers||0),period_days:Number(b.period_days||1)}));}
+    if(url.pathname==='/api/businesses/review'&&req.method==='POST')return json(res,await businessOS.review({min_profit_margin:Number(process.env.TW01_MIN_PROFIT_MARGIN||0.10),max_loss_periods:Number(process.env.TW01_MAX_LOSS_PERIODS||2),min_validation_days:Number(process.env.TW01_MIN_VALIDATION_DAYS||7),max_test_budget:Number(process.env.TW01_MAX_TEST_BUDGET||10000)}));
     if(url.pathname==='/api/agent-factory'&&req.method==='POST'){const b=await body(req);if(!String(b.name||'').trim()||!String(b.goal||'').trim())return json(res,{error:'name and goal are required'},400);return json(res,await factory.build({name:String(b.name),goal:String(b.goal),inputs:Array.isArray(b.inputs)?b.inputs.map(String):undefined,outputs:Array.isArray(b.outputs)?b.outputs.map(String):undefined,tools:Array.isArray(b.tools)?b.tools.map(String):undefined,schedule:b.schedule?String(b.schedule):undefined}));}
     if(url.pathname==='/api/research/import'&&req.method==='POST'){const b=await body(req);return json(res,{leads:await sales.importLeads(Array.isArray(b.items)?b.items:[])});}
     if(url.pathname==='/api/research/url'&&req.method==='POST'){const b=await body(req);return json(res,await sales.research.researchUrl(String(b.url||'')));}
