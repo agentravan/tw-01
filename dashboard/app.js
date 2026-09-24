@@ -34,3 +34,15 @@ $('#leads').addEventListener('click',async e=>{
  }catch(e){show('ERROR',{error:e.message})}finally{b.disabled=false;b.textContent=old;}
 });
 refresh().catch(e=>show('STARTUP ERROR',{error:e.message}));
+async function refreshBusinessOS(){
+ try{
+  const org=await api('/api/organization');
+  $('#workforce').innerHTML=org.roles.map(x=>`<article class="lead"><strong>${esc(x.name)}</strong> → ${esc(x.reports_to||'YOU')}<div>${esc(x.mission)}</div></article>`).join('');
+  const p=await api('/api/businesses');
+  $('#businesses').innerHTML=p.businesses.length?p.businesses.map(x=>`<article class="lead"><div><strong>${esc(x.name)}</strong> <span class="pill">${esc(x.status)}</span> <span class="score">v${esc(x.strategy_version)}</span></div><div>Test budget: ₹${esc(x.max_test_budget)} · Max loss: ₹${esc(x.max_loss)} · Loss periods: ${esc(x.consecutive_loss_periods)}</div><small>${esc(x.hypothesis)}</small><div class="actions"><button data-business-review="${esc(x.id)}">Review</button></div></article>`).join(''):'No businesses yet.';
+ }catch(e){$('#businesses').textContent=e.message}
+}
+$('#createBusiness').onclick=async()=>{try{await api('/api/businesses',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:$('#businessName').value,hypothesis:$('#businessHypothesis').value,budget:Number($('#businessBudget').value||10000)})});$('#businessName').value='';$('#businessHypothesis').value='';await refreshBusinessOS()}catch(e){show('BUSINESS ERROR',{error:e.message})}};
+$('#reviewBusinesses').onclick=async()=>{try{show('STRATEGY REVIEW',await api('/api/businesses/review',{method:'POST'}));await refreshBusinessOS()}catch(e){show('STRATEGY ERROR',{error:e.message})}};
+$('#dailyReport').onclick=async()=>{try{$('#dailyReportOutput').textContent=JSON.stringify(await api('/api/daily-report'),null,2)}catch(e){$('#dailyReportOutput').textContent=e.message}};
+refreshBusinessOS().catch(()=>{});
