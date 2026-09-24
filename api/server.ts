@@ -10,9 +10,10 @@ import { AI_ROLES } from '../organization/roles.js';
 import { buildDailyReport } from '../reports/daily.js';
 import { startDailyReportScheduler } from '../reports/scheduler.js';
 import { BusinessOS } from '../strategy/business-os.js';
+import { ControlRoom } from '../control-room/runtime.js';
 
 const employee=new AIEmployee(); await employee.initialize();
-const crm=new CRM(); const safety=new Safety(); const sales=new SalesEngine(); const factory=new AgentFactory(); const businessOS=new BusinessOS();
+const crm=new CRM(); const safety=new Safety(); const sales=new SalesEngine(); const factory=new AgentFactory(); const businessOS=new BusinessOS(); const controlRoom=new ControlRoom();
 
 const json=(res:any,data:any,status=200)=>{res.writeHead(status,{'content-type':'application/json','access-control-allow-origin':'*','access-control-allow-methods':'GET,POST,OPTIONS','access-control-allow-headers':'content-type,authorization'});res.end(JSON.stringify(data));};
 const body=async(req:any)=>{let raw='';for await(const chunk of req)raw+=chunk;return raw?JSON.parse(raw):{};};
@@ -29,6 +30,12 @@ const server=createServer(async(req,res)=>{
     if(url.pathname==='/api/status')return json(res,await safety.state());
     if(url.pathname==='/api/organization')return json(res,{roles:AI_ROLES});
     if(url.pathname==='/api/daily-report')return json(res,await buildDailyReport());
+    if(url.pathname==='/api/control-room')return json(res,await controlRoom.snapshot());
+    if(url.pathname==='/api/control-room/task'&&req.method==='POST'){const b=await body(req);return json(res,await controlRoom.createTask({goal:String(b.goal||''),assignedBy:String(b.assignedBy||'ai-office'),assignedTo:String(b.assignedTo||'ai-office'),parentTaskId:b.parentTaskId||null,priority:b.priority||'MEDIUM'}));}
+    if(url.pathname==='/api/control-room/run'&&req.method==='POST'){const b=await body(req);return json(res,await controlRoom.startRun(String(b.employeeId||''),String(b.taskId||''),String(b.trigger||'manual')));}
+    if(url.pathname==='/api/control-room/heartbeat'&&req.method==='POST'){const b=await body(req);await controlRoom.heartbeat(String(b.runId||''),String(b.message||'Heartbeat received'),b.progress==null?undefined:Number(b.progress));return json(res,{status:'OK'});}
+    if(url.pathname==='/api/control-room/progress'&&req.method==='POST'){const b=await body(req);await controlRoom.progress(String(b.runId||''),String(b.message||'Progress update'),b.progress==null?undefined:Number(b.progress),b.type||'PROGRESS');return json(res,{status:'OK'});}
+    if(url.pathname==='/api/control-room/finish'&&req.method==='POST'){const b=await body(req);await controlRoom.finish(String(b.runId||''),b.result||null,Boolean(b.failed));return json(res,{status:b.failed?'FAILED':'COMPLETED'});}
 
     if(url.pathname==='/api/stop'&&req.method==='POST'){await safety.emergencyStop();return json(res,{status:'DISABLED'});}
     if(url.pathname==='/api/resume'&&req.method==='POST'){await safety.resume();return json(res,{status:'WORKING'});}
@@ -98,6 +105,7 @@ const server=createServer(async(req,res)=>{
 
 const port=Number(process.env.PORT||3000);
 server.listen(port,'0.0.0.0',()=>{
+  controlRoom.ensureSeed().catch(error=>console.error('TW-01 control room seed error',error));
   startDailyReportScheduler();
   console.log(`TW-01 listening on http://localhost:${port}`);
   if(process.env.TW01_AUTO_RUN!=='false'){
