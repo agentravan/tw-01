@@ -14,6 +14,17 @@ import { ControlRoom } from '../control-room/runtime.js';
 
 const employee=new AIEmployee(); await employee.initialize();
 const crm=new CRM(); const safety=new Safety(); const sales=new SalesEngine(); const factory=new AgentFactory(); const businessOS=new BusinessOS(); const controlRoom=new ControlRoom();
+async function runAutonomousCycle(){
+  const task=await controlRoom.createTask({goal:'Run the autonomous sales and business-development cycle',assignedBy:'ai-boss',assignedTo:'ai-office',priority:'HIGH'});
+  const run=await controlRoom.startRun('ai-office',task.id,'scheduler');
+  try{
+    await controlRoom.progress(run.id,'AI Office started daily operating cycle',10);
+    const result=await sales.runCycle();
+    await controlRoom.progress(run.id,'Sales cycle completed; recording verified result',80);
+    await controlRoom.finish(run.id,result,false);
+    return result;
+  }catch(error){await controlRoom.finish(run.id,{error:String(error)},true);throw error;}
+}
 
 const json=(res:any,data:any,status=200)=>{res.writeHead(status,{'content-type':'application/json','access-control-allow-origin':'*','access-control-allow-methods':'GET,POST,OPTIONS','access-control-allow-headers':'content-type,authorization'});res.end(JSON.stringify(data));};
 const body=async(req:any)=>{let raw='';for await(const chunk of req)raw+=chunk;return raw?JSON.parse(raw):{};};
@@ -40,7 +51,7 @@ const server=createServer(async(req,res)=>{
     if(url.pathname==='/api/stop'&&req.method==='POST'){await safety.emergencyStop();return json(res,{status:'DISABLED'});}
     if(url.pathname==='/api/resume'&&req.method==='POST'){await safety.resume();return json(res,{status:'WORKING'});}
     if(url.pathname==='/api/command'&&req.method==='POST'){const b=await body(req);return json(res,await employee.command(b.command||''));}
-    if(url.pathname==='/api/cycle'&&req.method==='POST')return json(res,await sales.runCycle());
+    if(url.pathname==='/api/cycle'&&req.method==='POST')return json(res,await runAutonomousCycle());
 
     if(url.pathname==='/api/discover'&&req.method==='POST'){
       const b=await body(req);
@@ -110,8 +121,8 @@ server.listen(port,'0.0.0.0',()=>{
   console.log(`TW-01 listening on http://localhost:${port}`);
   if(process.env.TW01_AUTO_RUN!=='false'){
     const hours=Math.max(1,Number(process.env.TW01_CYCLE_HOURS||6));
-    sales.runCycle().then(result=>console.log('TW-01 initial autonomous cycle',result)).catch(error=>console.error('TW-01 initial cycle error',error));
-    setInterval(()=>sales.runCycle().catch(error=>console.error('TW-01 cycle error',error)),hours*60*60*1000);
+    runAutonomousCycle().then(result=>console.log('TW-01 initial autonomous cycle',result)).catch(error=>console.error('TW-01 initial cycle error',error));
+    setInterval(()=>runAutonomousCycle().catch(error=>console.error('TW-01 cycle error',error)),hours*60*60*1000);
     console.log(`TW-01 autonomous cycle enabled every ${hours}h`);
   }
 });
