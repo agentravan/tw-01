@@ -41,7 +41,10 @@ const server=createServer(async(req,res)=>{
     if(url.pathname==='/api/status')return json(res,await safety.state());
     if(url.pathname==='/api/organization')return json(res,{roles:AI_ROLES});
     if(url.pathname==='/api/daily-report')return json(res,await buildDailyReport());
-    if(url.pathname==='/api/control-room')return json(res,await controlRoom.snapshot());
+    if(url.pathname==='/api/control-room'){
+      const [control,safetyState,approvals]=await Promise.all([controlRoom.snapshot(),safety.state(),sales.approvals()]);
+      return json(res,{...control,safety:safetyState,approvals});
+    }
     if(url.pathname==='/api/control-room/task'&&req.method==='POST'){const b=await body(req);return json(res,await controlRoom.createTask({goal:String(b.goal||''),assignedBy:String(b.assignedBy||'ai-office'),assignedTo:String(b.assignedTo||'ai-office'),parentTaskId:b.parentTaskId||null,priority:b.priority||'MEDIUM'}));}
     if(url.pathname==='/api/control-room/run'&&req.method==='POST'){const b=await body(req);return json(res,await controlRoom.startRun(String(b.employeeId||''),String(b.taskId||''),String(b.trigger||'manual')));}
     if(url.pathname==='/api/control-room/heartbeat'&&req.method==='POST'){const b=await body(req);await controlRoom.heartbeat(String(b.runId||''),String(b.message||'Heartbeat received'),b.progress==null?undefined:Number(b.progress));return json(res,{status:'OK'});}
