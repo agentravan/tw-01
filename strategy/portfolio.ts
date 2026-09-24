@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { BusinessIdea, StrategyPolicy, StrategyDecision } from './engine.js';
+import type { BusinessIdea, BusinessStatus, StrategyPolicy, StrategyDecision } from './engine.js';
 import { evaluateBusiness } from './engine.js';
 
 export interface PortfolioState {
@@ -23,7 +23,7 @@ export function generateBoundedExperiments(
     id: randomUUID(),
     name: o.name,
     hypothesis: o.hypothesis,
-    status: 'IDEA',
+    status: 'IDEA' as BusinessStatus,
     created_at: new Date().toISOString(),
     strategy_version: 1,
     max_test_budget: maxBudget,
@@ -40,7 +40,7 @@ export function runPortfolioReview(
   const decisions = portfolio.businesses.map(b => evaluateBusiness(b, policy));
   const updated = portfolio.businesses.map(b => {
     const d = decisions.find(x => x.business_id === b.id)!;
-    const status = d.decision === 'SHUTDOWN' ? 'SHUTDOWN' :
+    const status: BusinessStatus = d.decision === 'SHUTDOWN' ? 'SHUTDOWN' :
       d.decision === 'SCALE' ? 'ACTIVE' :
       d.decision === 'PAUSE' ? 'PAUSED' :
       d.decision === 'CHANGE' ? 'OPTIMIZING' : 'VALIDATING';
