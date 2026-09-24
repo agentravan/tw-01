@@ -6,6 +6,9 @@ import { CRM } from '../crm/crm.js';
 import { Safety } from '../tools/safety.js';
 import { SalesEngine } from '../sales/engine.js';
 import { AgentFactory } from '../agents/factory.js';
+import { AI_ROLES } from '../organization/roles.js';
+import { buildDailyReport } from '../reports/daily.js';
+import { startDailyReportScheduler } from '../reports/scheduler.js';
 import { BusinessOS } from '../strategy/business-os.js';
 
 const employee=new AIEmployee(); await employee.initialize();
@@ -52,8 +55,16 @@ const server=createServer(async(req,res)=>{
     res.writeHead(200,{'content-type':file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html'});res.end(content);
   }catch(e){json(res,{error:String(e)},500);}
 });
+    if(url.pathname==='/api/organization')return json(res,{roles:AI_ROLES});
+    if(url.pathname==='/api/daily-report')return json(res,await buildDailyReport());
+    const file=url.pathname==='/'?'/dashboard/index.html':url.pathname;
+    const content=await readFile(new URL(`..${file}`,import.meta.url));
+    res.writeHead(200,{'content-type':file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html'});res.end(content);
+  }catch(e){json(res,{error:String(e)},500);}
+});
 const port=Number(process.env.PORT||3000);
 server.listen(port,'0.0.0.0',()=>{
+  startDailyReportScheduler();
   console.log(`TW-01 listening on http://localhost:${port}`);
   if(process.env.TW01_AUTO_RUN!=='false'){
     const hours=Math.max(1,Number(process.env.TW01_CYCLE_HOURS||6));
