@@ -1,5 +1,9 @@
 # TW-01 — Team Work AI Employee
 
+> **AI Employee Control Room:** [Open the live UI](https://agentravan.github.io/tw-01/)
+>
+> The Control Room is evidence-first: employee status becomes WORKING only when the runtime has a persisted run/heartbeat. The public GitHub Pages UI is the visual control surface; connect it to a running TW-01 API with `?api=https://your-api.example`.
+
 Free-first, open-source business-development automation foundation for Team Work Solutions.
 
 TW-01 helps Harshit research prospects, qualify leads, prepare compliant outreach, manage follow-ups, prepare meetings, and track revenue. External providers are optional; missing credentials are never simulated.
