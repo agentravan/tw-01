@@ -1,74 +1,38 @@
-const $=s=>document.querySelector(s); const esc=x=>String(x??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-async function api(p,o={}){const r=await fetch(p,o);const d=await r.json();if(!r.ok)throw new Error(d.error||'Request failed');return d;}
-function show(title,data){$('#output').innerHTML='<strong>'+esc(title)+'</strong>\n'+esc(JSON.stringify(data,null,2));window.scrollTo({top:0,behavior:'smooth'});}
-async function refresh(){
- const d=await api('/api/dashboard');
- $('#cards').innerHTML=Object.entries(d).filter(([k])=>!['paused','emergencyStop','activities','researchQueue'].includes(k)).map(([k,v])=>`<div class="card"><b>${esc(v)}</b><span>${esc(k)}</span></div>`).join('');
- const leads=await api('/api/leads');
- $('#leads').innerHTML=leads.length?leads.map(x=>`<article class="lead"><div><strong>${esc(x.company_name)}</strong> <span class="pill">${esc(x.status)}</span> <span class="score">${esc(x.lead_score)}</span></div><div>${esc(x.industry)} · ${esc(x.location)} · ${esc(x.contact_name||'No contact')}</div><small>${esc(x.possible_hr_problem||'Problem not yet verified')}</small><div class="actions">
- <button data-act="qualify" data-id="${esc(x.id)}">Qualify</button>
- <button data-act="email" data-id="${esc(x.id)}">Draft Email</button>
- <button data-act="wa" data-id="${esc(x.id)}">Draft WhatsApp</button>
- <button data-act="brief" data-id="${esc(x.id)}">Meeting Brief</button>
- <button data-act="follow" data-id="${esc(x.id)}">Follow-up +3d</button>
- </div></article>`).join(''):'No leads yet.';
+const $=s=>document.querySelector(s); const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const params=new URLSearchParams(location.search); const API=params.get('api')||'';
+async function api(path,options={}){const r=await fetch(API+path,options);const d=await r.json();if(!r.ok)throw Error(d.error||'Request failed');return d;}
+let snapshot=null,selected=null;
+const statusClass=s=>String(s||'').toLowerCase().replaceAll('_','-');
+function employeeCard(e){
+ const task=snapshot.tasks.find(t=>t.id===e.currentTaskId);
+ return `<button class="employeeCard ${statusClass(e.status)}" data-employee="${esc(e.id)}"><div class="employeeTop"><strong>${esc(e.name)}</strong><span class="status ${statusClass(e.status)}">${esc(e.status)}</span></div><div class="role">${esc(e.role)}</div><div class="current">${task?esc(task.goal):'No active task'}</div><div class="meta">Heartbeat: ${e.lastHeartbeat?new Date(e.lastHeartbeat).toLocaleTimeString('en-IN'):'—'} · Health: ${esc(e.health)}</div></button>`;
 }
-$('#cycle').onclick=async()=>{try{show('FULL SALES CYCLE',await api('/api/cycle',{method:'POST'}));await refresh()}catch(e){show('ERROR',{error:e.message})}};
-$('#run').onclick=async()=>{try{show('AI COMMAND',await api('/api/command',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({command:$('#command').value})}));await refresh()}catch(e){show('ERROR',{error:e.message})}};
-$('#stop').onclick=async()=>{await api('/api/stop',{method:'POST'});await refresh()};
-$('#resume').onclick=async()=>{await api('/api/resume',{method:'POST'});await refresh()};
-$('#import').onclick=async()=>{try{const items=JSON.parse($('#leadJson').value);const r=await api('/api/research/import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({items})});$('#researchOutput').textContent=JSON.stringify(r,null,2);await refresh()}catch(e){$('#researchOutput').textContent=e.message}};
-$('#researchUrl').onclick=async()=>{try{$('#researchOutput').textContent=JSON.stringify(await api('/api/research/url',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({url:$('#sourceUrl').value})}),null,2)}catch(e){$('#researchOutput').textContent=e.message}};
-$('#followups').onclick=async()=>{$('#due').textContent=JSON.stringify(await api('/api/followups/due'),null,2)};
-$('#leads').addEventListener('click',async e=>{
- const b=e.target.closest('button[data-act]'); if(!b)return;
- b.disabled=true; const old=b.textContent; b.textContent='Working…';
- try{
-   let r,title;
-   if(b.dataset.act==='qualify'){r=await api('/api/lead/qualify',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:b.dataset.id})});title='LEAD QUALIFIED';}
-   if(b.dataset.act==='email'){r=await api('/api/outreach/draft',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:b.dataset.id,channel:'email'})});title='EMAIL DRAFT';}
-   if(b.dataset.act==='wa'){r=await api('/api/outreach/draft',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:b.dataset.id,channel:'whatsapp'})});title='WHATSAPP DRAFT';}
-   if(b.dataset.act==='brief'){r=await api('/api/meeting/brief',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:b.dataset.id})});title='MEETING BRIEF';}
-   if(b.dataset.act==='follow'){r=await api('/api/followups/set',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:b.dataset.id,days:3})});title='FOLLOW-UP SET';}
-   show(title,r); await refresh();
- }catch(e){show('ERROR',{error:e.message})}finally{b.disabled=false;b.textContent=old;}
-});
-refresh().catch(e=>show('STARTUP ERROR',{error:e.message}));
-async function refreshBusinessOS(){
- try{
-  const org=await api('/api/organization');
-  $('#workforce').innerHTML=org.roles.map(x=>`<article class="lead"><strong>${esc(x.name)}</strong> → ${esc(x.reports_to||'YOU')}<div>${esc(x.mission)}</div></article>`).join('');
-  const p=await api('/api/businesses');
-  $('#businesses').innerHTML=p.businesses.length?p.businesses.map(x=>`<article class="lead"><div><strong>${esc(x.name)}</strong> <span class="pill">${esc(x.status)}</span> <span class="score">v${esc(x.strategy_version)}</span></div><div>Test budget: ₹${esc(x.max_test_budget)} · Max loss: ₹${esc(x.max_loss)} · Loss periods: ${esc(x.consecutive_loss_periods)}</div><small>${esc(x.hypothesis)}</small><div class="actions"><button data-business-review="${esc(x.id)}">Review</button></div></article>`).join(''):'No businesses yet.';
- }catch(e){$('#businesses').textContent=e.message}
+function render(){
+ const es=snapshot?.employees||[], ts=snapshot?.tasks||[], ev=snapshot?.events||[];
+ $('#connection').innerHTML='<span class="online">● Runtime API connected</span>';
+ $('#kpis').innerHTML=[[''+es.length,'AI Employees'],[''+es.filter(e=>e.status==='WORKING').length,'Working Now'],[''+ts.filter(t=>!['COMPLETED','FAILED','CANCELLED'].includes(t.status)).length,'Open Tasks'],[''+ts.filter(t=>t.status==='COMPLETED').length,'Completed'],[''+es.filter(e=>e.status==='STALLED'||e.status==='ERROR').length,'Attention']].map(x=>`<div class="card"><b>${x[0]}</b><span>${x[1]}</span></div>`).join('');
+ $('#employees').innerHTML=es.map(employeeCard).join('');
+ $('#tasks').innerHTML=ts.length?ts.map(t=>`<article class="taskRow"><div><strong>${esc(t.goal)}</strong><span class="status ${statusClass(t.status)}">${esc(t.status)}</span></div><div class="progress"><i style="width:${t.progress}%"></i></div><small>Assigned to: ${esc(es.find(e=>e.id===t.assignedTo)?.name||t.assignedTo)} · By: ${esc(es.find(e=>e.id===t.assignedBy)?.name||t.assignedBy)} · ${t.progress}%</small></article>`).join(''):'No tasks yet.';
+ $('#events').innerHTML=ev.slice(0,40).map(x=>`<article class="event"><span class="eventTime">${new Date(x.at).toLocaleTimeString('en-IN')}</span><span class="eventType">${esc(x.type)}</span><strong>${esc(es.find(e=>e.id===x.employeeId)?.name||x.employeeId)}</strong><span>${esc(x.message)}</span></article>`).join('')||'No runtime events yet.';
+ $('#org').innerHTML=es.map(e=>`<div class="orgNode"><strong>${esc(e.name)}</strong><span>${esc(e.role)}</span><small>Reports to: ${esc(es.find(x=>x.id===e.managerId)?.name||'Owner')}</small></div>`).join('');
+ if(selected){renderDetail(selected);}
 }
-$('#createBusiness').onclick=async()=>{try{await api('/api/businesses',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:$('#businessName').value,hypothesis:$('#businessHypothesis').value,budget:Number($('#businessBudget').value||10000)})});$('#businessName').value='';$('#businessHypothesis').value='';await refreshBusinessOS()}catch(e){show('BUSINESS ERROR',{error:e.message})}};
-$('#reviewBusinesses').onclick=async()=>{try{show('STRATEGY REVIEW',await api('/api/businesses/review',{method:'POST'}));await refreshBusinessOS()}catch(e){show('STRATEGY ERROR',{error:e.message})}};
+function renderDetail(id){
+ const e=snapshot.employees.find(x=>x.id===id); if(!e)return; const task=snapshot.tasks.find(t=>t.id===e.currentTaskId); const runs=snapshot.runs.filter(r=>r.employeeId===id).slice(0,15);
+ $('#detail').innerHTML=`<div class="detailHead"><div><h2>${esc(e.name)} <span class="status ${statusClass(e.status)}">${esc(e.status)}</span></h2><p>${esc(e.role)} · Manager: ${esc(snapshot.employees.find(x=>x.id===e.managerId)?.name||'Owner')}</p></div><button id="assignToEmployee" data-id="${esc(e.id)}">Assign Task</button></div>
+ <div class="detailGrid"><div><b>Current task</b><p>${task?esc(task.goal):'None'}</p></div><div><b>Last heartbeat</b><p>${e.lastHeartbeat?new Date(e.lastHeartbeat).toLocaleString('en-IN'):'—'}</p></div><div><b>Health</b><p>${esc(e.health)}</p></div><div><b>Outputs</b><p>${e.outputs}</p></div></div>
+ <h3>Run history</h3>${runs.length?runs.map(r=>`<div class="runRow"><b>${esc(r.status)}</b> · ${new Date(r.startedAt).toLocaleString('en-IN')} · ${r.durationMs?Math.round(r.durationMs/1000)+'s':'active'}<small> Run ${esc(r.id.slice(0,8))} · heartbeat ${new Date(r.heartbeatAt).toLocaleTimeString('en-IN')}</small></div>`).join(''):'No runs yet.'}`;
+}
+async function refreshControl(){
+ try{snapshot=await api('/api/control-room');render();await refreshBusiness();await refreshSafety();}
+ catch(e){$('#connection').innerHTML='<span class="offline">● Runtime not connected</span>';$('#employees').innerHTML='<div class="empty">The Control Room UI is online, but the AI runtime API is not connected. Run TW-01 locally or connect the API deployment using ?api=https://…</div>';}
+}
+async function refreshBusiness(){try{const p=await api('/api/businesses');$('#businesses').innerHTML=p.businesses.length?p.businesses.map(x=>`<article class="taskRow"><strong>${esc(x.name)}</strong><span class="status ${statusClass(x.status)}">${esc(x.status)}</span><p>${esc(x.hypothesis)}</p><small>Budget ₹${esc(x.max_test_budget)} · Loss periods ${esc(x.consecutive_loss_periods)} · Strategy v${esc(x.strategy_version)}</small></article>`).join(''):'No businesses tracked.'}catch{}}
+async function refreshSafety(){try{const s=await api('/api/status');$('#safety').innerHTML=`Paused: <b>${s.paused?'YES':'NO'}</b> · Emergency Stop: <b>${s.emergencyStop?'ACTIVE':'OFF'}</b>`}catch{}}
+$('#refreshControl').onclick=refreshControl; setInterval(refreshControl,5000);
+$('#employees').addEventListener('click',e=>{const b=e.target.closest('[data-employee]');if(!b)return;selected=b.dataset.employee;renderDetail(selected);document.querySelector('#detail').scrollIntoView({behavior:'smooth'});});
+$('#newTask').onclick=async()=>{const goal=prompt('Task goal?');if(!goal)return;const to=prompt('Assign to employee ID (e.g. ai-office, ai-hr, ai-finance):','ai-office');if(!to)return;try{await api('/api/control-room/task',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({goal,assignedBy:'ai-boss',assignedTo:to})});await refreshControl()}catch(e){alert(e.message)}};
+document.addEventListener('click',async e=>{if(e.target.id==='assignToEmployee'){const id=e.target.dataset.id;const goal=prompt('Task for this employee?');if(goal){await api('/api/control-room/task',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({goal,assignedBy:'ai-boss',assignedTo:id})});await refreshControl();}}});
+$('#stop').onclick=async()=>{await api('/api/stop',{method:'POST'});await refreshControl()}; $('#resume').onclick=async()=>{await api('/api/resume',{method:'POST'});await refreshControl()};
 $('#dailyReport').onclick=async()=>{try{$('#dailyReportOutput').textContent=JSON.stringify(await api('/api/daily-report'),null,2)}catch(e){$('#dailyReportOutput').textContent=e.message}};
-refreshBusinessOS().catch(()=>{});
-
-
-const WORK_ROADMAP=[
- ['Foundation','AI Business OS + strategy engine','DONE'],
- ['Command Center','AI Boss orchestration','IN PROGRESS'],
- ['AI Office','Autonomous opportunity discovery','NEXT'],
- ['AI Workforce','HR/Finance/Website/Stock/IT workers','NEXT'],
- ['Finance Guardrails','Budget ledger + approval limits','NEXT'],
- ['Autonomous Loop','Experiment → measure → adapt → scale/shutdown','NEXT'],
- ['Template Kit','Customer-facing dashboard/template marketplace','PLANNED'],
- ['Team Work','HR services business operating layer','PLANNED'],
- ['Production','CI, monitoring, recovery and deployment verification','PLANNED']
-];
-function renderWorkStatus(){
- $('#workStatus').innerHTML=WORK_ROADMAP.map(([a,b,s])=>`<article class="lead"><strong>${esc(a)}</strong><span class="pill">${esc(s)}</span><div>${esc(b)}</div></article>`).join('');
-}
-async function refreshCommitFeed(){
- try{
-  const r=await fetch('https://api.github.com/repos/agentravan/tw-01/commits?per_page=8',{headers:{accept:'application/vnd.github+json'}});
-  if(!r.ok) throw new Error('GitHub activity unavailable');
-  const commits=await r.json();
-  $('#commitFeed').innerHTML=commits.map(x=>`<article class="lead"><strong>${esc(x.commit.message.split('\\n')[0])}</strong><br><small>${esc(x.sha.slice(0,7))} · ${esc(new Date(x.commit.author.date).toLocaleString())} · ${esc(x.commit.author.name||'AI Worker')}</small></article>`).join('');
- }catch(e){$('#commitFeed').textContent=e.message}
-}
-renderWorkStatus(); refreshCommitFeed();
-setInterval(refreshCommitFeed,30000);
+refreshControl();
