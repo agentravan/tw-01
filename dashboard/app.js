@@ -46,3 +46,29 @@ $('#createBusiness').onclick=async()=>{try{await api('/api/businesses',{method:'
 $('#reviewBusinesses').onclick=async()=>{try{show('STRATEGY REVIEW',await api('/api/businesses/review',{method:'POST'}));await refreshBusinessOS()}catch(e){show('STRATEGY ERROR',{error:e.message})}};
 $('#dailyReport').onclick=async()=>{try{$('#dailyReportOutput').textContent=JSON.stringify(await api('/api/daily-report'),null,2)}catch(e){$('#dailyReportOutput').textContent=e.message}};
 refreshBusinessOS().catch(()=>{});
+
+
+const WORK_ROADMAP=[
+ ['Foundation','AI Business OS + strategy engine','DONE'],
+ ['Command Center','AI Boss orchestration','IN PROGRESS'],
+ ['AI Office','Autonomous opportunity discovery','NEXT'],
+ ['AI Workforce','HR/Finance/Website/Stock/IT workers','NEXT'],
+ ['Finance Guardrails','Budget ledger + approval limits','NEXT'],
+ ['Autonomous Loop','Experiment → measure → adapt → scale/shutdown','NEXT'],
+ ['Template Kit','Customer-facing dashboard/template marketplace','PLANNED'],
+ ['Team Work','HR services business operating layer','PLANNED'],
+ ['Production','CI, monitoring, recovery and deployment verification','PLANNED']
+];
+function renderWorkStatus(){
+ $('#workStatus').innerHTML=WORK_ROADMAP.map(([a,b,s])=>`<article class="lead"><strong>${esc(a)}</strong><span class="pill">${esc(s)}</span><div>${esc(b)}</div></article>`).join('');
+}
+async function refreshCommitFeed(){
+ try{
+  const r=await fetch('https://api.github.com/repos/agentravan/tw-01/commits?per_page=8',{headers:{accept:'application/vnd.github+json'}});
+  if(!r.ok) throw new Error('GitHub activity unavailable');
+  const commits=await r.json();
+  $('#commitFeed').innerHTML=commits.map(x=>`<article class="lead"><strong>${esc(x.commit.message.split('\\n')[0])}</strong><br><small>${esc(x.sha.slice(0,7))} · ${esc(new Date(x.commit.author.date).toLocaleString())} · ${esc(x.commit.author.name||'AI Worker')}</small></article>`).join('');
+ }catch(e){$('#commitFeed').textContent=e.message}
+}
+renderWorkStatus(); refreshCommitFeed();
+setInterval(refreshCommitFeed,30000);
