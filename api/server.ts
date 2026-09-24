@@ -89,7 +89,9 @@ const server=createServer(async(req,res)=>{
     if(url.pathname==='/api/agent-factory'&&req.method==='POST'){
       const b=await body(req);
       if(!String(b.name||'').trim()||!String(b.goal||'').trim())return json(res,{error:'name and goal are required'},400);
-      return json(res,await factory.build({name:String(b.name),goal:String(b.goal),inputs:Array.isArray(b.inputs)?b.inputs.map(String):undefined,outputs:Array.isArray(b.outputs)?b.outputs.map(String):undefined,tools:Array.isArray(b.tools)?b.tools.map(String):undefined,schedule:b.schedule?String(b.schedule):undefined}));
+      const built=await factory.build({name:String(b.name),goal:String(b.goal),inputs:Array.isArray(b.inputs)?b.inputs.map(String):undefined,outputs:Array.isArray(b.outputs)?b.outputs.map(String):undefined,tools:Array.isArray(b.tools)?b.tools.map(String):undefined,schedule:b.schedule?String(b.schedule):undefined});
+      const employeeRecord=await controlRoom.registerEmployee({name:built.name,role:String(b.role||'SPECIALIST'),managerId:'ai-hr',model:'local/configured',capabilities:built.tools,permissions:['read configured inputs','write assigned outputs']});
+      return json(res,{...built,employeeRecord});
     }
     if(url.pathname==='/api/research/import'&&req.method==='POST'){const b=await body(req);return json(res,{leads:await sales.importLeads(Array.isArray(b.items)?b.items:[])});}
     if(url.pathname==='/api/research/url'&&req.method==='POST'){const b=await body(req);return json(res,await sales.research.researchUrl(String(b.url||'')));}
