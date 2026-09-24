@@ -1,5 +1,6 @@
 import { JsonStore } from '../memory/store.js';
-import { generateBoundedExperiments, runPortfolioReview, type Opportunity } from './portfolio.js';
+import { generateBoundedExperiments, runPortfolioReview } from './portfolio.js';
+import { recordMetric } from './engine.js';
 
 export class BusinessOS {
   constructor(private store = new JsonStore()) {}
@@ -23,7 +24,6 @@ export class BusinessOS {
     return this.store.update(s => {
       const b = s.businesses.find(x => x.id === businessId);
       if (!b) throw new Error('business not found');
-      const { recordMetric } = requireEngine();
       const updated = recordMetric(b, metric);
       Object.assign(b, updated);
     });
@@ -54,18 +54,4 @@ export class BusinessOS {
     const s = await this.store.load();
     return { businesses: s.businesses, decisions: s.strategyDecisions.slice(-100) };
   }
-}
-
-function requireEngine() {
-  return {
-    recordMetric: (b: any, m: any) => {
-      const profit = m.revenue - m.direct_cost - m.operating_cost - m.acquisition_cost;
-      return {
-        ...b,
-        metrics: [...b.metrics, m],
-        status: profit > 0 ? 'ACTIVE' : 'OPTIMIZING',
-        consecutive_loss_periods: profit <= 0 ? b.consecutive_loss_periods + 1 : 0
-      };
-    }
-  };
 }
