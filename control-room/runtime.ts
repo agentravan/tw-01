@@ -32,6 +32,7 @@ export class ControlRoom {
     await this.store.save(s);
     return {employees:s.employees,tasks:s.tasks,runs:s.runs.slice(-100).reverse(),events:s.workEvents.slice(-250).reverse()};
   }
+  async registerEmployee(input:{name:string;role:string;managerId?:string|null;model?:string;capabilities?:string[];permissions?:string[]}){const id=input.name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,60);const employee:EmployeeRecord={id,name:input.name,role:input.role,managerId:input.managerId??'ai-hr',model:input.model??'configured-runtime',capabilities:input.capabilities??[],permissions:input.permissions??[],status:'IDLE',currentTaskId:null,lastHeartbeat:null,lastCompletedTaskId:null,createdAt:now(),updatedAt:now(),health:'HEALTHY',spendUsd:0,outputs:0};await this.store.update(s=>{s.employees??=[];if(!s.employees.some(e=>e.id===id))s.employees.push(employee);});return employee;}
   async createTask(input:{goal:string;assignedBy:string;assignedTo:string;parentTaskId?:string|null;priority?:TaskRecord['priority']}) {
     const task:TaskRecord={id:this.store.id(),goal:input.goal,assignedBy:input.assignedBy,assignedTo:input.assignedTo,parentTaskId:input.parentTaskId??null,priority:input.priority??'MEDIUM',status:'ASSIGNED',progress:0,createdAt:now(),startedAt:null,updatedAt:now(),completedAt:null,blockers:[],approvals:[],result:null};
     await this.store.update(s=>{s.tasks ??=[];s.tasks.push(task);const e=s.employees?.find(x=>x.id===task.assignedTo);if(e){e.currentTaskId=task.id;e.status='WORKING';e.updatedAt=now();}});
