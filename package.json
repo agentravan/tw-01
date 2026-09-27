@@ -5,15 +5,16 @@
   "description": "Free-first Team Work AI Employee",
   "type": "module",
   "scripts": {
-    "dev": "tsx api/server.ts",
+    "dev": "tsx server/main.ts",
     "build": "tsc --noEmit",
     "test": "vitest run",
     "lint": "tsc --noEmit",
-    "start": "tsx api/server.ts",
+    "start": "tsx server/main.ts",
     "check": "npm run build && npm test",
     "certify": "tsx scripts/certify.ts",
     "verify:production": "tsx scripts/verify-production.ts",
-    "e2e": "tsx tests/e2e/http.e2e.ts"
+    "e2e": "tsx tests/e2e/http.e2e.ts",
+    "build:vercel": "node scripts/build-vercel.mjs"
   },
   "engines": {
     "node": ">=20"
@@ -27,6 +28,7 @@
     "@types/nodemailer": "^7.0.3",
     "tsx": "^4.19.0",
     "typescript": "^5.6.3",
-    "vitest": "^2.1.5"
+    "vitest": "^2.1.5",
+    "esbuild": "^0.25.0"
   }
 }

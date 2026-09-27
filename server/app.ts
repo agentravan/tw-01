@@ -1,5 +1,4 @@
-import 'dotenv/config';
-import { createServer } from 'node:http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { AIEmployee } from '../agents/employee.js';
 import { CRM } from '../crm/crm.js';
@@ -8,7 +7,6 @@ import { SalesEngine } from '../sales/engine.js';
 import { AgentFactory } from '../agents/factory.js';
 import { AI_ROLES } from '../organization/roles.js';
 import { buildDailyReport } from '../reports/daily.js';
-import { startDailyReportScheduler } from '../reports/scheduler.js';
 import { BusinessOS } from '../strategy/business-os.js';
 import { ControlRoom } from '../control-room/runtime.js';
 import { extname, resolve, sep } from 'node:path';
@@ -19,11 +17,15 @@ import { smtpMailer } from '../company/email.js';
 import { handleCompany, readRaw, bearer } from './company-routes.js';
 import { safeEqual } from '../company/util.js';
 
-const employee=new AIEmployee(); await employee.initialize();
-const company=new Company({mailer:smtpMailer(),razorpay:new Razorpay(configFromEnv()),allowedOrigin:process.env.TW01_ALLOWED_ORIGIN||'',supportEmail:process.env.SUPPORT_EMAIL||undefined});
-await company.init();
-const crm=new CRM(); const safety=new Safety(); const sales=new SalesEngine(); const factory=new AgentFactory(); const businessOS=new BusinessOS(); const controlRoom=new ControlRoom();
-async function runAutonomousCycle(){
+/** Everything the server needs, created once per process (or per serverless instance). */
+const employee=new AIEmployee();
+export const company=new Company({mailer:smtpMailer(),razorpay:new Razorpay(configFromEnv()),allowedOrigin:process.env.TW01_ALLOWED_ORIGIN||'',supportEmail:process.env.SUPPORT_EMAIL||undefined});
+export const controlRoom=new ControlRoom();
+const crm=new CRM(); const safety=new Safety(); const sales=new SalesEngine(); const factory=new AgentFactory(); const businessOS=new BusinessOS();
+let ready:Promise<void>|null=null;
+/** Idempotent start-up: seeds skills, products, the Founder account and registers self-tested tools. Retried if it fails. */
+export function init(){ if(!ready) ready=(async()=>{await employee.initialize();await company.init();await controlRoom.ensureSeed();})().catch(e=>{ready=null;throw e;}); return ready; }
+export async function runAutonomousCycle(){
   const task=await controlRoom.createTask({goal:'Run the autonomous sales and business-development cycle',assignedBy:'ai-boss',assignedTo:'ai-office',priority:'HIGH'});
   const run=await controlRoom.startRun('ai-office',task.id,'scheduler');
   try{
@@ -55,9 +57,13 @@ function staticPath(pathname:string):string|null{
   return full;
 }
 
-const server=createServer(async(req,res)=>{
+/** The HTTP handler used by both the local server (server/main.ts) and the Vercel function (server/vercel.ts). */
+export async function handle(req:IncomingMessage,res:ServerResponse){
   try{
+    await init();
     const url=new URL(req.url||'/',`http://${req.headers.host}`);
+    // Vercel routes /api/* to one function and passes the original path as __p (see scripts/build-vercel.mjs).
+    const orig=url.searchParams.get('__p'); if(orig&&process.env.VERCEL){url.pathname=orig;url.searchParams.delete('__p');}
     if(await handleCompany(company,req,res,url))return;
     if(req.method==='OPTIONS'){res.writeHead(204);return res.end();}
     if(url.pathname.startsWith('/api/')&&!(await auth(req)))return json(res,{error:'unauthorized'},401);
@@ -144,17 +150,4 @@ const server=createServer(async(req,res)=>{
     res.writeHead(200,{'content-type':TYPES[extname(file)],'x-content-type-options':'nosniff','referrer-policy':'no-referrer'});
     res.end(content);
   }catch(e){console.error('[tw01] legacy route error',e);json(res,{error:'Internal error'},500);}
-});
-
-const port=Number(process.env.PORT||3000);
-server.listen(port,'0.0.0.0',()=>{
-  controlRoom.ensureSeed().catch(error=>console.error('TW-01 control room seed error',error));
-  startDailyReportScheduler();
-  console.log(`TW-01 listening on http://localhost:${port}`);
-  if(process.env.TW01_AUTO_RUN!=='false'){
-    const hours=Math.max(1,Number(process.env.TW01_CYCLE_HOURS||6));
-    runAutonomousCycle().then(result=>console.log('TW-01 initial autonomous cycle',result)).catch(error=>console.error('TW-01 initial cycle error',error));
-    setInterval(()=>runAutonomousCycle().catch(error=>console.error('TW-01 cycle error',error)),hours*60*60*1000);
-    console.log(`TW-01 autonomous cycle enabled every ${hours}h`);
-  }
-});
+}

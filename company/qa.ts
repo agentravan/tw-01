@@ -1,4 +1,3 @@
-import { readFile, stat } from 'node:fs/promises';
 import type { DashboardBuild, Product, QAReport } from './types.js';
 import { normHeader, parseCsv, parseDate } from './csv.js';
 import { uid } from './util.js';
@@ -42,17 +41,17 @@ function recompute(recs: Rec[], asOf: string) {
   return { headcount: hc, joiners_12m: jn, exits_12m: ex, avg_headcount_12m: r2(avg), attrition_pct_12m: avg > 0 ? r2((ex / avg) * 100) : 0, female_pct: hc ? r2((fem / hc) * 100) : 0, avg_tenure_years: hc ? r2(tenureDays / hc / 365.25) : 0 };
 }
 
-export async function runDashboardQA(input: { orderId: string; build: DashboardBuild; product: Product; rawCsv: string; otherCustomersIds: string[]; at: string }): Promise<QAReport> {
+export async function runDashboardQA(input: { orderId: string; build: DashboardBuild; product: Product; rawCsv: string; otherCustomersIds: string[]; at: string; read: (key: string) => Promise<string | null> }): Promise<QAReport> {
   const checks: QAReport['checks'] = [];
   const add = (name: string, passed: boolean, detail: string) => checks.push({ name, passed, detail });
   const { build } = input;
 
   // Delivery: files exist and are non-empty
   let html = '';
-  try { const st = await stat(build.dashboardPath); html = await readFile(build.dashboardPath, 'utf8'); add('delivery.dashboard_file', st.size > 1000, `${st.size} bytes`); }
-  catch (e) { add('delivery.dashboard_file', false, `missing: ${(e as Error).message}`); }
+  try { html = (await input.read(build.dashboardPath)) ?? ''; add('delivery.dashboard_file', html.length > 1000, html ? `${Buffer.byteLength(html)} bytes` : 'missing'); }
+  catch (e) { add('delivery.dashboard_file', false, `unreadable: ${(e as Error).message}`); }
   let guide = '';
-  if (build.guidePath) { try { guide = await readFile(build.guidePath, 'utf8'); add('delivery.guide_file', guide.length > 500, `${guide.length} chars`); } catch (e) { add('delivery.guide_file', false, `missing: ${(e as Error).message}`); } }
+  if (build.guidePath) { try { guide = (await input.read(build.guidePath)) ?? ''; add('delivery.guide_file', guide.length > 500, guide ? `${guide.length} chars` : 'missing'); } catch (e) { add('delivery.guide_file', false, `unreadable: ${(e as Error).message}`); } }
   else add('delivery.guide_file', false, 'no guide produced');
 
   // Embedded data block

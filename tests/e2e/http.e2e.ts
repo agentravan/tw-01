@@ -27,8 +27,8 @@ const env = { ...process.env, NODE_ENV: 'test', PORT: String(PORT), DATA_FILE: j
   FOUNDER_EMAIL: 'harshit@e2e.test', FOUNDER_PASSWORD: 'e2e-founder-password', RAZORPAY_KEY_ID: gw.keyId, RAZORPAY_KEY_SECRET: gw.keySecret, RAZORPAY_WEBHOOK_SECRET: gw.webhookSecret, RAZORPAY_API_BASE: `http://127.0.0.1:${gwPort}`, SMTP_HOST: '', TW01_ALLOWED_ORIGIN: 'https://console.example' };
 // Resolve tsx from the repo (CI) or fall back to a tsx on PATH (local).
 let tsxCli: string | null = null; try { tsxCli = createRequire(join(ROOT, 'package.json')).resolve('tsx/cli'); } catch {}
-const srv = tsxCli ? spawn(process.execPath, [tsxCli, join(ROOT, 'api/server.ts')], { cwd: dir, env, stdio: ['ignore', 'pipe', 'pipe'] })
-  : spawn('tsx', [join(ROOT, 'api/server.ts')], { cwd: dir, env, stdio: ['ignore', 'pipe', 'pipe'] });
+const srv = tsxCli ? spawn(process.execPath, [tsxCli, join(ROOT, 'server/main.ts')], { cwd: dir, env, stdio: ['ignore', 'pipe', 'pipe'] })
+  : spawn('tsx', [join(ROOT, 'server/main.ts')], { cwd: dir, env, stdio: ['ignore', 'pipe', 'pipe'] });
 let log = ''; srv.stdout.on('data', d => (log += d)); srv.stderr.on('data', d => (log += d));
 
 let passed = 0; const failures: string[] = [];

@@ -12,7 +12,6 @@
   "include": [
     "agents/**/*.ts",
     "ai/**/*.ts",
-    "api/**/*.ts",
     "company/**/*.ts",
     "control-room/**/*.ts",
     "crm/**/*.ts",
@@ -22,6 +21,7 @@
     "reports/**/*.ts",
     "sales/**/*.ts",
     "scripts/**/*.ts",
+    "server/**/*.ts",
     "skills/**/*.ts",
     "src/**/*.ts",
     "strategy/**/*.ts",

@@ -81,8 +81,9 @@ Rules: no secret exposure, no fake results, no irreversible external actions wit
       }catch{}
     }
 
-    await mkdir('data/agent-factory',{recursive:true});
-    await writeFile(result.artifactPath,JSON.stringify({...result,created_at:new Date().toISOString()},null,2),'utf8');
+    // Serverless hosts have a read-only disk: the design is still returned (and registered by the caller) if the file cannot be written.
+    try{await mkdir('data/agent-factory',{recursive:true});await writeFile(result.artifactPath,JSON.stringify({...result,created_at:new Date().toISOString()},null,2),'utf8');}
+    catch(e){result.artifactPath=`not saved: ${(e as Error).message}`;}
     return result;
   }
 }

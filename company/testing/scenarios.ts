@@ -1,4 +1,3 @@
-import { readFile, rm, writeFile } from 'node:fs/promises';
 import type { CertLevel, Role, TestResult } from '../types.js';
 import { Company } from '../service.js';
 import { validateEmployeeMaster } from '../hr-data.js';
@@ -224,8 +223,8 @@ export const SCENARIOS: Scenario[] = [
     return withH({}, async h => {
       const { orderId } = await paidOrder(h); await h.co.runOrderPipeline(orderId);
       const s = await state(h); const b = s.builds.find(x => x.orderId === orderId)!; const p = s.products.find(x => x.id === b.productId)!;
-      await rm(b.guidePath!);
-      const rep = await runDashboardQA({ orderId, build: b, product: p, rawCsv: generatedCsv(), otherCustomersIds: [], at: 't' });
+      await h.co.blobs.remove(b.guidePath!);
+      const rep = await runDashboardQA({ orderId, build: b, product: p, rawCsv: generatedCsv(), otherCustomersIds: [], at: 't', read: k => h.co.blobs.get(k) });
       ok(!rep.passed && rep.checks.some(c => c.name === 'delivery.guide_file' && !c.passed), 'missing guide detected');
       return [`${rep.checks.filter(c => !c.passed).length} failed checks`];
     });
@@ -234,8 +233,8 @@ export const SCENARIOS: Scenario[] = [
     return withH({}, async h => {
       const { orderId } = await paidOrder(h); await h.co.runOrderPipeline(orderId);
       const s = await state(h); const b = s.builds.find(x => x.orderId === orderId)!; const p = s.products.find(x => x.id === b.productId)!;
-      const html = await readFile(b.dashboardPath, 'utf8'); await writeFile(b.dashboardPath, html.replace('</footer>', 'cus_intruder00001</footer>'));
-      const rep = await runDashboardQA({ orderId, build: b, product: p, rawCsv: generatedCsv(), otherCustomersIds: ['cus_intruder00001'], at: 't' });
+      const html = (await h.co.blobs.get(b.dashboardPath))!; await h.co.blobs.put(b.dashboardPath, html.replace('</footer>', 'cus_intruder00001</footer>'));
+      const rep = await runDashboardQA({ orderId, build: b, product: p, rawCsv: generatedCsv(), otherCustomersIds: ['cus_intruder00001'], at: 't', read: k => h.co.blobs.get(k) });
       ok(rep.checks.find(c => c.name === 'security.customer_isolation')?.passed === false, 'leak detected');
       return ['isolation failure detected'];
     });
@@ -502,7 +501,7 @@ export const SCENARIOS: Scenario[] = [
       let limited = false;
       for (let i = 0; i < 40; i++) { try { await h.co.login('founder@test.local', 'wrong-password-x', `10.0.0.${i}`); } catch (e) { if ((e as any).code === 'RATE_LIMITED') { limited = true; break; } } }
       ok(limited, 'rotating IPs must not allow unlimited guesses');
-      const { clientIp } = await import('../../api/company-routes.js');
+      const { clientIp } = await import('../../server/company-routes.js');
       const fake: any = { headers: { 'x-forwarded-for': '1.2.3.4' }, socket: { remoteAddress: '9.9.9.9' } };
       ok(clientIp(fake, false) === '9.9.9.9', 'X-Forwarded-For ignored unless TW01_TRUST_PROXY');
       ok(clientIp(fake, true) === '1.2.3.4', 'X-Forwarded-For used behind a trusted proxy');
@@ -593,7 +592,7 @@ export const SCENARIOS: Scenario[] = [
     });
   } },
   { name: 'review #10: behind a trusted proxy the proxy-appended address is used', employee: 'AI_SECURITY', level: 'REGRESSION', async run() {
-    const { clientIp } = await import('../../api/company-routes.js');
+    const { clientIp } = await import('../../server/company-routes.js');
     const req: any = { headers: { 'x-forwarded-for': '6.6.6.6, 203.0.113.9' }, socket: { remoteAddress: '10.0.0.2' } };
     ok(clientIp(req, true) === '203.0.113.9', `got ${clientIp(req, true)}`);
     return ['rightmost'];
@@ -623,6 +622,19 @@ export const SCENARIOS: Scenario[] = [
       for (let i = 0; i < 15; i++) { try { await h.co.claimPayment(c, order.id, { paymentId: `pay_FAKE${String(i).padStart(10, '0')}` }); } catch (e) { if ((e as any).code === 'RATE_LIMITED') { limited = true; break; } } }
       ok(limited, 'claims limited'); ok(h.gw.calls.length - before <= 10, `gateway calls ${h.gw.calls.length - before}`);
       return ['limited'];
+    });
+  } },
+  { name: 'Founder can change the password; old password and other sessions stop working', employee: 'AI_SECURITY', level: 'FUNCTIONAL', async run() {
+    return withH({}, async h => {
+      const a = await h.co.login('founder@test.local', 'founder-test-password-1', 'test'); const b = await h.co.login('founder@test.local', 'founder-test-password-1', 'test');
+      const actor = (await h.co.actorFromToken(a.token))!;
+      await rejects(h.co.changePassword(actor, 'wrong-current-pw', 'new-founder-password-9', a.token), 'UNAUTHENTICATED', 'wrong current password');
+      await h.co.changePassword(actor, 'founder-test-password-1', 'new-founder-password-9', a.token);
+      ok(!!(await h.co.actorFromToken(a.token)), 'current session kept');
+      ok(!(await h.co.actorFromToken(b.token)), 'other session signed out');
+      await rejects(h.co.login('founder@test.local', 'founder-test-password-1', 'test'), 'UNAUTHENTICATED', 'old password');
+      ok(!!(await h.co.login('founder@test.local', 'new-founder-password-9', 'test')).token, 'new password works');
+      return ['changed'];
     });
   } },
 ];

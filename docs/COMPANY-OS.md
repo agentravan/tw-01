@@ -73,8 +73,8 @@ Two independent review passes on 2026-09-27 found 11 defects: 7, then 4 more, tw
 
 ## Known limits (not yet built)
 
-- **Persistence** is still the JSON file. It is fine on a VPS or Docker volume, but not on Vercel's serverless disk. A Postgres adapter is the next step before a Vercel deployment.
-- **Uploads and deliverables** are stored on local disk under `data/`. Serverless hosting needs object storage (for example Vercel Blob or Supabase Storage).
+- **Persistence**: the JSON file locally or on a VPS; Supabase Postgres on Vercel (set `TW01_SUPABASE_*` and `TW01_DB_SECRET`). The whole state is one versioned JSONB document. That is fine at this scale, but should be split into tables as volume grows.
+- **Uploads and deliverables**: `data/` locally; the private `tw01_blobs` table on Supabase.
 - **Rate limiting** is in-memory, so it applies per process. Limits apply per IP, and per account for devices that have not signed in before, so a stranger cannot lock the Founder out of a known device. The known-device list is in memory, so after a restart the Founder may briefly be limited like anyone else. **Locked out?** All limits are in memory, so restarting the server clears them. Behind a reverse proxy or CDN, set `TW01_TRUST_PROXY=true` and make sure exactly one trusted hop appends `X-Forwarded-For`. Otherwise every request appears to come from the proxy's IP, and failed logins from strangers count against you. Payment claims are limited to 10 per customer per hour. `X-Forwarded-For` is trusted only with `TW01_TRUST_PROXY=true`.
 - **Build engines** exist only for the employee-master family: HR Master, Headcount, Attrition, Diversity and CHRO. Payroll, Attendance, Recruitment, Compliance, F&F and Custom need their own data schemas and builders.
 - **Dropshipping, HR services and the remaining nine employees** are not implemented.

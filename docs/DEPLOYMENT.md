@@ -21,4 +21,23 @@ Blank provider variables intentionally produce `NOT_CONFIGURED`. Configure only 
 3. Start the server, sign in at `/console`, set a price for a product and activate it.
 4. Run **Certification → Run all self-tests now**, then **verify production** against the https URL. Only after that do employees become PRODUCTION_READY.
 
-**Vercel:** not supported yet. The JSON store and the uploaded and delivered files need a writable, durable disk. Use a VPS or Docker host with a mounted `data/` volume until a Postgres and object-storage adapter is added.
+## Vercel + Supabase (free tier)
+
+`vercel.json` runs `npm run build:vercel` (scripts/build-vercel.mjs). That build writes a Build Output API bundle: the UI folders become static files, and the whole server becomes one Node function in the Mumbai region (`bom1`).
+
+On Vercel, state and files live in Supabase Postgres (`supabase/migrations/0001_tw01_secure_store.sql`). The tables are private, and every read or write goes through functions that check `TW01_DB_SECRET`. Writes use compare-and-swap, so two function instances cannot overwrite each other.
+
+Set these environment variables in the Vercel project:
+- `TW01_SUPABASE_URL`, `TW01_SUPABASE_KEY` (the project's publishable key), `TW01_DB_SECRET`
+- `FOUNDER_EMAIL`, `FOUNDER_PASSWORD`
+- optionally `RAZORPAY_*`, the SMTP settings and `SUPPORT_EMAIL`
+
+Limits on serverless:
+- No scheduled autonomous cycle or daily report.
+- Rate limits apply per function instance.
+- The order pipeline runs inside the request that triggers it, such as a payment confirmation or a Founder override.
+- Vercel's free Hobby plan is for non-commercial use, so move to Pro (or a VPS) before selling for real.
+
+## Docker / VPS
+
+`docker build -t tw01 . && docker run -p 3000:3000 -v tw01-data:/app/data --env-file .env tw01`

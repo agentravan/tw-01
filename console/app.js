@@ -15,7 +15,7 @@ async function api(path, opts = {}) {
 }
 const post = (p, b) => api(p, { method: 'POST', body: JSON.stringify(b || {}) });
 let view = 'overview', flash = null, detailId = null;
-const TABS = [['overview', 'Overview'], ['orders', 'Orders'], ['objective', 'Give the AI Boss an objective'], ['cert', 'Certification'], ['products', 'Products'], ['audit', 'Audit log'], ['health', 'System health']];
+const TABS = [['overview', 'Overview'], ['orders', 'Orders'], ['objective', 'Give the AI Boss an objective'], ['cert', 'Certification'], ['products', 'Products'], ['audit', 'Audit log'], ['health', 'System health'], ['account', 'My account']];
 const pillFor = s => ({ COMPLETED: 'ok', DELIVERED: 'ok', PAID: 'ok', APPROVED: 'ok', PRODUCTION_READY: 'ok', PASS: 'ok', OK: 'ok', WORKING: 'ok', IN_PRODUCTION: 'warn', QA: 'warn', TESTING: 'warn', PENDING: 'warn', AWAITING_PAYMENT: 'warn', PAYMENT_REVIEW: 'warn', REVISION: 'warn', INFO_REQUIRED: 'warn', WAITING: 'warn', IN_PROGRESS: 'warn', ASSIGNED: 'warn', REFUND_REQUESTED: 'warn', BLOCKED: 'bad', FAILED: 'bad', ESCALATED: 'bad', PAYMENT_FAILED: 'bad', REJECTED: 'bad', REFUNDED: 'bad', FAIL: 'bad', DENIED: 'bad', PAUSED: 'bad', DEGRADED: 'bad' }[s] || '');
 const pill = s => `<span class="pill ${pillFor(s)}">${esc(String(s).replace(/_/g, ' '))}</span>`;
 const say = (kind, text) => { flash = { kind, text }; };
@@ -44,6 +44,9 @@ function renderLogin() {
 }
 
 const VIEWS = {
+  async account() {
+    return `<h1>My account</h1><form class="panel" id="pwform" style="max-width:420px"><div class="pb" style="display:flex;flex-direction:column;gap:10px"><label class="f" for="pw-cur">Current password<input id="pw-cur" type="password" autocomplete="current-password" required></label><label class="f" for="pw-new">New password (10+ characters)<input id="pw-new" type="password" autocomplete="new-password" required></label><button class="btn p" type="submit">Change password</button><p class="muted" style="margin:0;font-size:12.5px">Other devices signed in to this account will be signed out.</p></div></form>`;
+  },
   async overview() {
     const o = await api('/api/co/admin/overview'); const t = o.metrics.totals, p = o.metrics.pipeline;
     $('#gw').textContent = `Razorpay ${o.gateway.razorpay} · Webhook ${o.gateway.webhook} · Email ${o.gateway.smtp}`;
@@ -132,6 +135,7 @@ document.addEventListener('submit', async e => {
   e.preventDefault();
   try {
     if (e.target.id === 'login') { const r = await post('/api/co/auth/login', { email: $('#em').value, password: $('#pw').value }); setToken(r.token); view = 'overview'; return render(); }
+    if (e.target.id === 'pwform') { await post('/api/co/auth/password', { current: $('#pw-cur').value, next: $('#pw-new').value }); say('ok', 'Password changed. Other sessions were signed out.'); return render(); }
     if (e.target.id === 'obj') { const t = await post('/api/co/admin/objective', { text: $('#objtext').value }); say(t.status === 'COMPLETED' ? 'ok' : 'bad', `Task ${t.id} → ${t.agent}: ${t.status}${t.errors.length ? ' — ' + t.errors.at(-1) : ''}`); return render(); }
   } catch (err) { say('bad', err.message); render(); }
 });

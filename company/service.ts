@@ -1,9 +1,8 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { mkdir } from 'node:fs/promises';
+import { defaultBlobStore, type BlobStore } from './blobs.js';
+import { resolve } from 'node:path';
 import { JsonStore } from '../memory/store.js';
 import { emptyCompany, type Actor, type CompanyState, type Customer, type Order, type OrderStatus, type PaymentRecord, type Role, type StoredFile, type Task, type User } from './types.js';
-import { tmpdir } from 'node:os';
-import { mkdtemp, rm } from 'node:fs/promises';
 import { CompanyError, clip, email as vEmail, fail, indianMobile, isoDate, money, sha256, str, systemClock, uid, type Clock } from './util.js';
 import { actorLabel, can, require as requirePerm, requireOwner, AGENT_ROLES } from './rbac.js';
 import { appendAudit, verifyAuditChain, type AuditInput } from './audit.js';
@@ -21,7 +20,7 @@ import { renderHrDashboard } from './dashboard-build.js';
 import { renderGuide } from './guide.js';
 import { runDashboardQA } from './qa.js';
 
-export interface CompanyOptions { store?: JsonStore; razorpay?: Razorpay; mailer: Mailer; clock?: Clock; dataDir?: string; supportEmail?: string; allowedOrigin?: string; env?: NodeJS.ProcessEnv; }
+export interface CompanyOptions { blobs?: BlobStore; store?: JsonStore; razorpay?: Razorpay; mailer: Mailer; clock?: Clock; dataDir?: string; supportEmail?: string; allowedOrigin?: string; env?: NodeJS.ProcessEnv; }
 const agent = (role: Role): Actor => ({ kind: 'agent', id: role.toLowerCase().replace(/_/g, '-'), role });
 const PAID_STATES: OrderStatus[] = ['PAID', 'IN_PRODUCTION', 'INFO_REQUIRED', 'QA', 'REVISION', 'DELIVERED', 'REFUND_REQUESTED'];
 const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
@@ -47,6 +46,7 @@ export const CUSTOMER_STATUS: Record<OrderStatus, string> = {
 export class Company {
   readonly store: JsonStore; readonly razorpay: Razorpay; readonly mailer: Mailer; readonly clock: Clock; readonly dataDir: string; readonly supportEmail: string; readonly allowedOrigin: string; readonly env: NodeJS.ProcessEnv;
   readonly tools = new ToolRuntime();
+  readonly blobs: BlobStore;
   readonly loginLimiter = new RateLimiter(8, 10 * 60_000);
   /** Per-account limit, independent of the (spoofable) client IP. */
   readonly accountLimiter = new RateLimiter(20, 15 * 60_000);
@@ -59,7 +59,7 @@ export class Company {
 
   constructor(o: CompanyOptions) {
     this.store = o.store ?? new JsonStore(); this.razorpay = o.razorpay ?? new Razorpay(null); this.mailer = o.mailer; this.clock = o.clock ?? systemClock;
-    this.dataDir = resolve(o.dataDir ?? 'data'); this.supportEmail = o.supportEmail ?? 'support@teamworksolutions.in'; this.allowedOrigin = o.allowedOrigin ?? ''; this.env = o.env ?? process.env;
+    this.dataDir = resolve(o.dataDir ?? 'data'); this.blobs = o.blobs ?? defaultBlobStore(this.dataDir); this.supportEmail = o.supportEmail ?? 'support@teamworksolutions.in'; this.allowedOrigin = o.allowedOrigin ?? ''; this.env = o.env ?? process.env;
   }
   now() { return this.clock.now().toISOString(); }
   /** Serialized transaction over the company state. Throws roll back automatically (state is not saved). */
@@ -77,7 +77,7 @@ export class Company {
   // ---------------------------------------------------------------- bootstrap
   async init() {
     if (this.initialized) return;
-    await mkdir(this.dataDir, { recursive: true });
+    if (this.blobs.kind === 'fs') await mkdir(this.dataDir, { recursive: true });
     await this.tx(async s => {
       if (!s.products.length) { s.products = seedProducts(); this.audit(s, agent('AI_BOSS'), { what: 'products.seeded', detail: `${s.products.length} products, all inactive until the Founder sets prices` }); }
       const fe = this.env.FOUNDER_EMAIL, fp = this.env.FOUNDER_PASSWORD;
@@ -125,20 +125,20 @@ export class Company {
 
   /** QA tool self-test: a correct build must pass and a build with a falsified KPI must fail. */
   private async qaSelfTest(csv: string): Promise<string | null> {
-    const dir = await mkdtemp(join(tmpdir(), 'tw01-qa-'));
-    try {
+    const mem = new Map<string, string>(); const read = async (k: string) => mem.get(k) ?? null;
+    {
       const emps = validateEmployeeMaster(csv).employees; const asOf = dataAsOf(emps); const kpiKeys = ['headcount', 'exits_12m', 'attrition_pct_12m'] as (keyof KpiSet)[];
       const product = { ...seedProducts()[0], kpis: kpiKeys as string[] };
       const r = renderHrDashboard({ buildId: 'bld_selftest', productName: 'T', company: 'T', employees: emps, asOf, kpiKeys });
       const g = renderGuide({ buildId: 'bld_selftest', productName: 'T', company: 'T', asOf, kpis: r.kpis, kpiKeys, filters: r.filters, rowCount: emps.length, supportEmail: 'a@b.c', orderId: 'ORD-0' });
-      const dp = join(dir, 'd.html'), gp = join(dir, 'g.html'); await writeFile(dp, r.html); await writeFile(gp, g);
+      const dp = 'selftest/d.html', gp = 'selftest/g.html'; mem.set(dp, r.html); mem.set(gp, g);
       const build = { id: 'bld_selftest', orderId: 'ORD-0', productId: product.id, at: 't', kpis: r.kpis as any, rowCount: emps.length, asOf, filters: r.filters, dashboardPath: dp, guidePath: gp, dataSha256: '' };
-      const good = await runDashboardQA({ orderId: 'ORD-0', build, product, rawCsv: csv, otherCustomersIds: ['cus_other'], at: 't' });
+      const good = await runDashboardQA({ orderId: 'ORD-0', build, product, rawCsv: csv, otherCustomersIds: ['cus_other'], at: 't', read });
       if (!good.passed) return `correct build failed QA: ${good.checks.filter(c => !c.passed).map(c => c.name).join(', ')}`;
-      await writeFile(dp, r.html.replace(`"headcount":${r.kpis.headcount}`, `"headcount":${r.kpis.headcount + 7}`));
-      const bad = await runDashboardQA({ orderId: 'ORD-0', build, product, rawCsv: csv, otherCustomersIds: [], at: 't' });
+      mem.set(dp, r.html.replace(`"headcount":${r.kpis.headcount}`, `"headcount":${r.kpis.headcount + 7}`));
+      const bad = await runDashboardQA({ orderId: 'ORD-0', build, product, rawCsv: csv, otherCustomersIds: [], at: 't', read });
       return bad.passed ? 'falsified KPI was not detected' : null;
-    } finally { await rm(dir, { recursive: true, force: true }); }
+    }
   }
 
   // ---------------------------------------------------------------- auth
@@ -171,6 +171,22 @@ export class Company {
     });
   }
   async logout(token: string) { await this.tx(s => revokeSession(s, token)); }
+  /** Change your own password. Signs out every other session of that account. */
+  async changePassword(actor: Actor | null, current: unknown, next: unknown, keepToken: string) {
+    if (!actor || actor.kind !== 'user') return fail('UNAUTHENTICATED', 'Sign in first.');
+    const pw = validatePassword(next);
+    const hash = hashPassword(pw);
+    return this.tx(s => {
+      const u = s.users.find(x => x.id === actor.id)!;
+      if (!verifyPassword(String(current ?? ''), u.passwordHash)) { this.audit(s, actor, { what: 'auth.password_change', result: 'DENIED', detail: 'current password wrong' }); fail('UNAUTHENTICATED', 'Current password is incorrect.'); }
+      if (verifyPassword(pw, u.passwordHash)) fail('VALIDATION', 'Choose a password different from the current one.');
+      u.passwordHash = hash;
+      const keep = sha256(keepToken);
+      s.sessions = s.sessions.filter(x => x.userId !== u.id || x.tokenHash === keep);
+      this.audit(s, actor, { what: 'auth.password_changed', entity: 'user', entityId: u.id, detail: 'other sessions signed out' });
+      return { ok: true };
+    });
+  }
 
   // ---------------------------------------------------------------- products
   async listProducts(actor: Actor | null) {
@@ -277,9 +293,9 @@ export class Company {
     return this.tx(async s => {
       const o = this.getOrder(s, a, orderId);
       if (['REFUNDED', 'CANCELLED', 'REFUND_REQUESTED'].includes(o.status)) fail('BAD_STATE', 'This order no longer accepts files.');
-      const id = uid('fil'); const dir = join(this.dataDir, 'uploads', o.id); await mkdir(dir, { recursive: true });
-      const path = join(dir, `${id}.csv`); // server-chosen name: no path traversal via the client file name
-      await writeFile(path, text!, 'utf8');
+      const id = uid('fil');
+      const path = `uploads/${o.id}/${id}.csv`; // server-chosen key: no path traversal via the client file name
+      await this.blobs.put(path, text!);
       const f: StoredFile = { id, name: fname.replace(/[^\w.\- ]/g, '_'), path, bytes, sha256: sha256(text!), uploadedAt: this.now() };
       o.files.push(f);
       this.audit(s, a, { what: 'order.file_uploaded', entity: 'order', entityId: o.id, detail: `${f.name} ${bytes} bytes sha256 ${f.sha256.slice(0, 12)}` });
@@ -560,8 +576,8 @@ export class Company {
       if (t.type === 'DATA_VALIDATION') {
         const f = this.latestFile(o);
         if (!f) return this.needInfo(s, o, t, ['No employee master file has been uploaded yet.'], log);
-        const csv = await readFile(f.path, 'utf8');
-        if (sha256(csv) !== f.sha256) throw new Error(`stored file ${f.id} does not match its recorded hash`);
+        const csv = (await this.blobs.get(f.path)) ?? '';
+        if (sha256(csv) !== f.sha256) throw new Error(`stored file ${f.id} is missing or does not match its recorded hash`);
         const { execution, output } = await this.tools.execute<ValidationResult>(s, 'AI_DASHBOARD', 'csv.validate', csv, { taskId: t.id, at });
         if (!output.ok) {
           const issues = output.missingColumns.length ? [`Missing required columns: ${output.missingColumns.join(', ')}`] : output.issues.slice(0, 10).map(i => `Row ${i.row}, ${i.column}: ${i.problem}`);
@@ -584,17 +600,16 @@ export class Company {
         const vt = s.tasks.find(x => x.id === t.dependencies[0]);
         const f = o.files.find(x => x.id === vt?.outputs.fileId);
         if (!f) throw Object.assign(new Error('validated file not found'), { noRetry: true });
-        const csv = await readFile(f.path, 'utf8');
-        if (sha256(csv) !== f.sha256) throw Object.assign(new Error(`stored file ${f.id} does not match its recorded hash`), { noRetry: true });
+        const csv = (await this.blobs.get(f.path)) ?? '';
+        if (sha256(csv) !== f.sha256) throw Object.assign(new Error(`stored file ${f.id} is missing or does not match its recorded hash`), { noRetry: true });
         const v = await this.tools.execute<ValidationResult>(s, 'AI_DASHBOARD', 'csv.validate', csv, { taskId: t.id, at });
         if (!v.output.ok) throw Object.assign(new Error('validated file no longer validates'), { noRetry: true });
         const emps = v.output.employees; const asOf = dataAsOf(emps); const buildId = uid('bld');
         const c = this.customerOf(s, o);
         const r = await this.tools.execute<ReturnType<typeof renderHrDashboard>>(s, 'AI_DASHBOARD', 'dashboard.render', { buildId, productName: p.name, company: c.company, employees: emps, asOf, kpiKeys: p.kpis as (keyof KpiSet)[] }, { taskId: t.id, at });
         const g = await this.tools.execute<string>(s, 'AI_DASHBOARD', 'guide.render', { buildId, productName: p.name, company: c.company, asOf, kpis: r.output.kpis, kpiKeys: p.kpis as (keyof KpiSet)[], filters: r.output.filters, rowCount: emps.length, supportEmail: this.supportEmail, orderId: o.id }, { taskId: t.id, at });
-        const dir = join(this.dataDir, 'deliverables', o.id, buildId); await mkdir(dir, { recursive: true });
-        const dashboardPath = join(dir, 'dashboard.html'); const guidePath = join(dir, 'guide.html');
-        await writeFile(dashboardPath, r.output.html, 'utf8'); await writeFile(guidePath, g.output, 'utf8');
+        const dashboardPath = `deliverables/${o.id}/${buildId}/dashboard.html`; const guidePath = `deliverables/${o.id}/${buildId}/guide.html`;
+        await this.blobs.put(dashboardPath, r.output.html); await this.blobs.put(guidePath, g.output);
         const build = { id: buildId, orderId: o.id, productId: p.id, at: at(), kpis: r.output.kpis as unknown as Record<string, number>, rowCount: emps.length, asOf, filters: r.output.filters, dashboardPath, guidePath, dataSha256: f.sha256 };
         s.builds.push(build);
         for (const e of [v.execution, r.execution, g.execution]) addEvidence(s, t, { kind: 'tool_execution', ref: e.id, note: e.tool });
@@ -603,7 +618,7 @@ export class Company {
         if (o.status === 'IN_PRODUCTION' || o.status === 'REVISION') this.setStatus(s, o, 'QA', agent('AI_DASHBOARD'), `build ${buildId} submitted to QA`);
         // Independent QA by AI_QA.
         const others = s.customers.filter(x => x.id !== o.customerId).flatMap(x => [x.id, x.email]).concat(s.orders.filter(x => x.customerId !== o.customerId).map(x => x.id));
-        const q = await this.tools.execute<Awaited<ReturnType<typeof runDashboardQA>>>(s, 'AI_QA', 'qa.dashboard', { orderId: o.id, build, product: p, rawCsv: csv, otherCustomersIds: others, at: at() }, { taskId: t.id, at });
+        const q = await this.tools.execute<Awaited<ReturnType<typeof runDashboardQA>>>(s, 'AI_QA', 'qa.dashboard', { orderId: o.id, build, product: p, rawCsv: csv, otherCustomersIds: others, at: at(), read: (k: string) => this.blobs.get(k) }, { taskId: t.id, at });
         s.qaReports.push(q.output);
         addEvidence(s, t, { kind: 'file', ref: q.output.id, note: `QA report ${q.output.passed ? 'passed' : 'failed'}` });
         const failed = q.output.checks.filter(c => !c.passed);
@@ -624,7 +639,7 @@ export class Company {
         if (!o.deliverables.buildId) throw new Error('no QA-passed build to deliver');
         const qaOk = s.qaReports.some(r => r.buildId === o.deliverables.buildId && r.passed);
         if (!qaOk) throw Object.assign(new Error('build has no passing QA report'), { noRetry: true });
-        const files = await Promise.all([o.deliverables.dashboard!, o.deliverables.guide!].map(p => readFile(p).then(b => b.length > 0, () => false)));
+        const files = await Promise.all([o.deliverables.dashboard!, o.deliverables.guide!].map(p => this.blobs.get(p).then(b => !!b && b.length > 0, () => false)));
         if (!files.every(Boolean)) throw new Error('deliverable files missing');
         // Files are now downloadable from the portal: that is the delivery.
         this.setStatus(s, o, 'DELIVERED', agent('AI_DASHBOARD'), `build ${o.deliverables.buildId} available in the customer portal`);
@@ -810,7 +825,9 @@ export class Company {
       return p!;
     });
     await this.tx(s => { this.audit(s, a, { what: `deliverable.download.${which}`, entity: 'order', entityId: orderId }); });
-    return readFile(path, 'utf8');
+    const content = await this.blobs.get(path);
+    if (content == null) fail('NOT_FOUND', 'File is missing from storage.');
+    return content!;
   }
 
   metrics(s: CompanyState, leadsCount: number) {
@@ -911,7 +928,7 @@ export class Company {
     const r = await this.read(s => ({ chain: verifyAuditChain(s.audit), tools: s.tools.map(t => ({ name: t.name, status: t.status, lastTest: t.lastTest })), counts: { orders: s.orders.length, tasks: s.tasks.length, audit: s.audit.length, pendingApprovals: s.approvals.filter(a => a.status === 'PENDING').length, escalated: s.tasks.filter(t => t.status === 'ESCALATED').length, failedToolExecutions24h: s.toolExecutions.filter(e => e.status !== 'OK' && Date.parse(e.at) > Date.now() - 864e5).length }, lastTestRun: s.testRuns.at(-1) ? { id: s.testRuns.at(-1)!.id, at: s.testRuns.at(-1)!.at, passed: s.testRuns.at(-1)!.passed, failed: s.testRuns.at(-1)!.failed } : null }));
     return {
       status: r.chain.ok && r.tools.every(t => t.status === 'ACTIVE') ? 'OK' : 'DEGRADED', checkedAt: this.now(), storeLatencyMs: Date.now() - started,
-      store: { kind: 'json-file', path: this.store.path, durableOnServerless: false },
+      store: { kind: this.store.backend.kind, path: this.store.path, durableOnServerless: this.store.backend.durableOnServerless, files: this.blobs.kind },
       runtime: { serverless: !!(this.env.VERCEL || this.env.AWS_LAMBDA_FUNCTION_NAME || this.env.NETLIFY), node: process.version },
       integrations: { razorpay: this.razorpay.configured ? 'CONFIGURED' : 'NOT_CONFIGURED', razorpayWebhook: this.razorpay.webhookConfigured ? 'CONFIGURED' : 'NOT_CONFIGURED', smtp: this.mailer.configured ? 'CONFIGURED' : 'NOT_CONFIGURED' },
       auditChain: r.chain, tools: r.tools, counts: r.counts, lastTestRun: r.lastTestRun,

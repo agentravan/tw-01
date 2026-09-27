@@ -35,8 +35,11 @@ function send(co: Company, req: IncomingMessage, res: ServerResponse, status: nu
   res.writeHead(status, headers(co, req, { 'content-type': 'application/json; charset=utf-8' })); res.end(JSON.stringify(body));
 }
 
-/** Runs the order pipeline after the response, so payment callbacks return fast. Failures are recorded by the pipeline itself. */
-function kick(co: Company, orderId: string) { setImmediate(() => { co.runOrderPipeline(orderId).catch(e => console.error('[tw01] pipeline', orderId, (e as Error).message)); }); }
+/**
+ * Runs the order pipeline before responding. Serverless platforms may freeze a function once the response
+ * is sent, so work is never left running in the background. Failures are recorded by the pipeline itself.
+ */
+async function kick(co: Company, orderId: string) { try { await co.runOrderPipeline(orderId); } catch (e) { console.error('[tw01] pipeline', orderId, (e as Error).message); } }
 
 /** Handles /api/co/*. Returns false if the path is not a company route. */
 export async function handleCompany(co: Company, req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
@@ -49,7 +52,7 @@ export async function handleCompany(co: Company, req: IncomingMessage, res: Serv
     if (m === 'POST' && p === '/api/co/webhooks/razorpay') {
       const raw = await readRaw(req, MAX_JSON);
       const r: any = await co.handleWebhook(raw, req.headers as any);
-      if (r?.matched && r?.status === 'PAID' && r.orderId) kick(co, r.orderId);
+      if (r?.matched && r?.status === 'PAID' && r.orderId) await kick(co, r.orderId);
       send(co, req, res, 200, { ok: true }); return true;
     }
     actor = await co.actorFromToken(bearer(req));
@@ -62,17 +65,18 @@ export async function handleCompany(co: Company, req: IncomingMessage, res: Serv
     if (m === 'POST' && p === '/api/co/auth/register') return ok(await co.registerCustomer(await readJson(req), clientIp(req)), 201);
     if (m === 'POST' && p === '/api/co/auth/login') { const b = await readJson(req); return ok(await co.login(b.email, b.password, clientIp(req))); }
     if (m === 'POST' && p === '/api/co/auth/logout') { const t = bearer(req); if (t) await co.logout(t); return ok({ ok: true }); }
+    if (m === 'POST' && p === '/api/co/auth/password') { const b = await readJson(req); return ok(await co.changePassword(actor, b.current, b.next, bearer(req) ?? '')); }
     if (m === 'GET' && p === '/api/co/me') { if (!actor) throw new CompanyError('UNAUTHENTICATED', 'Sign in first.'); return ok(await co.read(s => { const u = s.users.find(x => x.id === actor!.id)!; return { id: u.id, name: u.name, email: u.email, role: u.role }; })); }
 
     // Customer portal
     if (m === 'GET' && p === '/api/co/orders') return ok(await co.myOrders(actor));
     if (m === 'POST' && p === '/api/co/orders') return ok(await co.createOrder(actor, await readJson(req)), 201);
     if ((mm = /^\/api\/co\/orders\/(ORD-\d+)$/.exec(p)) && m === 'GET') return ok(await co.myOrder(actor, mm[1]));
-    if ((mm = /^\/api\/co\/orders\/(ORD-\d+)\/files$/.exec(p)) && m === 'POST') { const b = await readJson(req, MAX_UPLOAD); const r = await co.uploadFile(actor, mm[1], b.name, b.content); kick(co, mm[1]); return ok(r, 201); }
-    if ((mm = /^\/api\/co\/orders\/(ORD-\d+)\/checkout\/confirm$/.exec(p)) && m === 'POST') { const r = await co.confirmCheckout(actor, mm[1], await readJson(req)); if ((r as any).verified) kick(co, mm[1]); return ok(r); }
+    if ((mm = /^\/api\/co\/orders\/(ORD-\d+)\/files$/.exec(p)) && m === 'POST') { const b = await readJson(req, MAX_UPLOAD); const r = await co.uploadFile(actor, mm[1], b.name, b.content); await kick(co, mm[1]); return ok(r, 201); }
+    if ((mm = /^\/api\/co\/orders\/(ORD-\d+)\/checkout\/confirm$/.exec(p)) && m === 'POST') { const r = await co.confirmCheckout(actor, mm[1], await readJson(req)); if ((r as any).verified) await kick(co, mm[1]); return ok(r); }
     if ((mm = /^\/api\/co\/orders\/(ORD-\d+)\/checkout\/retry$/.exec(p)) && m === 'POST') return ok(await co.retryPayment(actor, mm[1]));
-    if ((mm = /^\/api\/co\/orders\/(ORD-\d+)\/claim$/.exec(p)) && m === 'POST') { const r = await co.claimPayment(actor, mm[1], await readJson(req)); if (r.status === 'VERIFIED') kick(co, mm[1]); return ok(r); }
-    if ((mm = /^\/api\/co\/orders\/(ORD-\d+)\/revision$/.exec(p)) && m === 'POST') { const b = await readJson(req); const r = await co.requestRevision(actor, mm[1], b.note); kick(co, mm[1]); return ok(r); }
+    if ((mm = /^\/api\/co\/orders\/(ORD-\d+)\/claim$/.exec(p)) && m === 'POST') { const r = await co.claimPayment(actor, mm[1], await readJson(req)); if (r.status === 'VERIFIED') await kick(co, mm[1]); return ok(r); }
+    if ((mm = /^\/api\/co\/orders\/(ORD-\d+)\/revision$/.exec(p)) && m === 'POST') { const b = await readJson(req); const r = await co.requestRevision(actor, mm[1], b.note); await kick(co, mm[1]); return ok(r); }
     if ((mm = /^\/api\/co\/orders\/(ORD-\d+)\/download\/(dashboard|guide)$/.exec(p)) && m === 'GET') {
       const html = await co.deliverable(actor, mm[1], mm[2] as 'dashboard' | 'guide');
       // Attachment + sandbox CSP: the customer's dashboard never executes on this origin.
@@ -105,7 +109,7 @@ export async function handleCompany(co: Company, req: IncomingMessage, res: Serv
     }
     if ((mm = /^\/api\/co\/admin\/approvals\/(apr_\w+)$/.exec(p)) && m === 'POST') {
       const b = await readJson(req); const r = await co.decideApproval(actor, mm[1], b.decision, b.reason);
-      if (r.status === 'APPROVED' && r.action === 'production.override') kick(co, r.entityId);
+      if (r.status === 'APPROVED' && r.action === 'production.override') await kick(co, r.entityId);
       return ok(r);
     }
     if ((mm = /^\/api\/co\/admin\/products\/([a-z0-9-]+)$/.exec(p)) && m === 'POST') return ok(await co.configureProduct(actor, mm[1], await readJson(req)));

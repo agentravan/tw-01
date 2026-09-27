@@ -55,7 +55,7 @@ Open `http://localhost:3000`. The included PWA is responsive for Android and des
 - `integrations/` optional provider adapters
 - `crm/` lead, pipeline, scoring and follow-up logic
 - `dashboard/` PWA frontend
-- `api/` HTTP API
+- `server/` HTTP server (`main.ts` local/Docker, `vercel.ts` serverless, `app.ts` shared handler)
 - `tests/` unit, integration and regression tests
 - `docs/` deployment and operating guidance
 
