@@ -57,6 +57,9 @@ try {
   const F = fl.data.token;
   check('founder session unlocks legacy control room', (await j('GET', '/api/control-room', undefined, F)).status === 200);
   check('wrong password rejected', (await j('POST', '/api/co/auth/login', { email: 'harshit@e2e.test', password: 'nope-nope-nope' })).status === 401);
+  let spoofLimited = false;
+  for (let i = 0; i < 12; i++) { const r = await j('POST', '/api/co/auth/login', { email: 'nobody@e2e.test', password: 'guess-guess-guess' }, undefined, { 'x-forwarded-for': `203.0.113.${i}` }); if (r.status === 429) { spoofLimited = true; break; } }
+  check('spoofed X-Forwarded-For does not bypass the login limit', spoofLimited);
   check('nothing on sale before the Founder prices a product', (await j('GET', '/api/co/products')).data.length === 0);
   const act = await j('POST', '/api/co/admin/products/payroll', { price: 9999, active: true }, F);
   check('product without a build engine cannot be activated', act.status === 409, JSON.stringify(act.data));
@@ -94,7 +97,10 @@ try {
   check('dashboard download is an attachment with sandbox CSP', dl.status === 200 && /attachment/.test(dl.headers.get('content-disposition') ?? '') && dl.headers.get('content-security-policy') === 'sandbox');
   check('dashboard contains filters and data', html.includes('id="f-department"') && html.includes('tw01-data'));
   const detail = await j('GET', `/api/co/admin/orders/${oid}`, undefined, F);
-  check('founder sees 3 completed tasks with evidence + passing QA', detail.data.tasks.length === 3 && detail.data.tasks.every((t: any) => t.status === 'COMPLETED' && t.evidence.length) && detail.data.qa[0]?.passed, JSON.stringify(detail.data.tasks.map((t: any) => t.status)));
+  const byType = Object.fromEntries(detail.data.tasks.map((t: any) => [t.type, t]));
+  check('validation and build tasks completed with evidence + passing QA', ['DATA_VALIDATION', 'DASHBOARD_BUILD'].every(k => byType[k]?.status === 'COMPLETED' && byType[k].evidence.length) && detail.data.qa[0]?.passed, JSON.stringify(detail.data.tasks.map((t: any) => t.status)));
+  // SMTP is not configured in this run: the delivery task must not claim the customer was notified (review finding #5).
+  check('delivery task escalated because the customer was not emailed', byType.DELIVERY?.status === 'ESCALATED' && /not notified/.test(byType.DELIVERY.errors.join(' ')), JSON.stringify(byType.DELIVERY));
   check('customer view exposes no internal tasks/audit', !JSON.stringify((await j('GET', `/api/co/orders/${oid}`, undefined, C)).data).match(/tasks|audit|agent:|AI_/));
 
   // Isolation
@@ -106,6 +112,8 @@ try {
   // CORS
   const evil = await fetch(B + '/api/co/products', { headers: { origin: 'https://evil.example' } });
   check('no CORS for unknown origins', !evil.headers.get('access-control-allow-origin'));
+  const pre = await fetch(B + '/api/co/orders', { method: 'OPTIONS', headers: { origin: 'https://console.example', 'access-control-request-method': 'POST' } });
+  check('CORS preflight answered for the configured origin', pre.status === 204 && pre.headers.get('access-control-allow-origin') === 'https://console.example');
   const good = await fetch(B + '/api/co/products', { headers: { origin: 'https://console.example' } });
   check('CORS only for the configured origin', good.headers.get('access-control-allow-origin') === 'https://console.example');
 

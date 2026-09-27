@@ -53,7 +53,7 @@ export function validateEvidence(s: CompanyState, e: Evidence): string | null {
     case 'tool_execution': { const x = s.toolExecutions.find(r => r.id === e.ref); return !x ? 'tool execution not found' : x.status !== 'OK' ? `tool execution ${x.status}` : null; }
     case 'payment': { const p = s.payments.find(r => r.id === e.ref); return !p ? 'payment record not found' : !p.verified ? 'payment not verified' : null; }
     case 'test_run': return s.testRuns.some(r => r.id === e.ref) ? null : 'test run not found';
-    case 'email': return s.emails.some(r => r.id === e.ref) ? null : 'email record not found';
+    case 'email': { const m = s.emails.find(r => r.id === e.ref); return !m ? 'email record not found' : m.status !== 'SENT' ? `email was not sent (${m.status})` : null; }
     case 'audit': return s.audit.some(r => r.id === e.ref) ? null : 'audit entry not found';
     case 'file': return s.builds.some(b => b.id === e.ref) || s.orders.some(o => o.files.some(f => f.id === e.ref)) || s.qaReports.some(q => q.id === e.ref) ? null : 'file/build not found';
     default: return 'unknown evidence kind';

@@ -58,8 +58,8 @@ function staticPath(pathname:string):string|null{
 const server=createServer(async(req,res)=>{
   try{
     const url=new URL(req.url||'/',`http://${req.headers.host}`);
-    if(req.method==='OPTIONS'){res.writeHead(204);return res.end();}
     if(await handleCompany(company,req,res,url))return;
+    if(req.method==='OPTIONS'){res.writeHead(204);return res.end();}
     if(url.pathname.startsWith('/api/')&&!(await auth(req)))return json(res,{error:'unauthorized'},401);
 
     if(url.pathname==='/api/dashboard')return json(res,await employee.dashboard());

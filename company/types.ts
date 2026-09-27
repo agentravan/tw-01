@@ -66,7 +66,7 @@ export interface Customer { id: string; name: string; company: string; email: st
 export interface Order {
   id: string; customerId: string; productId: string; productName: string; amount: number; currency: 'INR';
   status: OrderStatus; requirement: Record<string, string>; files: StoredFile[];
-  gatewayOrderId: string | null; paymentVerified: boolean; paymentId: string | null;
+  gatewayOrderId: string | null; gatewayOrderIds?: string[]; paymentVerified: boolean; paymentId: string | null;
   productionOverrideApprovalId: string | null; revisionCount: number; revisionNotes: string[];
   deliverables: { dashboard: string | null; guide: string | null; buildId: string | null };
   timeline: { at: string; from: OrderStatus | null; to: OrderStatus; by: string; note: string }[];

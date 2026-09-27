@@ -19,7 +19,7 @@ See [docs/COMPANY-OS.md](docs/COMPANY-OS.md) for the rules, configuration and kn
 ```bash
 npm test                  # unit, regression and all AI-employee certification scenarios
 npm run certify           # certification table per employee and level
-npm run e2e               # starts the server and drives the full workflow over HTTP
+npm run e2e               # starts the server and drives the full workflow over HTTP (41 checks)
 ```
 
 

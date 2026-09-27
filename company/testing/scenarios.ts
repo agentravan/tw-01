@@ -460,6 +460,161 @@ export const SCENARIOS: Scenario[] = [
       return [orderId];
     });
   } },
+
+  // ------------------------------------------------------------------ Independent review findings (2026-09-27). Each failed before its fix.
+  { name: 'review #1: one Razorpay payment can never pay two orders (claim binding + webhook reuse)', employee: 'AI_FINANCE', level: 'SECURITY', async run() {
+    return withH({}, async h => {
+      const pid = await h.activeProduct(); const cust = await h.customer();
+      const real = h.co.razorpay; (h.co as any).razorpay = new Razorpay(null);
+      const { order: A } = await h.co.createOrder(cust, orderInput(pid)); // no gateway order
+      (h.co as any).razorpay = real;
+      const { order: B, checkout } = await h.co.createOrder(cust, orderInput(pid));
+      const paid = h.gw.pay((checkout as any).gatewayOrderId);
+      const claim = await h.co.claimPayment(cust, A.id, { paymentId: paid.razorpay_payment_id });
+      ok(claim.status === 'REJECTED', `claim of B's payment on A: ${JSON.stringify(claim)}`);
+      const wh = h.gw.webhook('payment.captured', paid.payment); await h.co.handleWebhook(wh.raw, wh.headers);
+      const s = await state(h);
+      const paidOrders = s.orders.filter(o => o.paymentVerified && o.paymentId === paid.razorpay_payment_id).map(o => o.id);
+      ok(JSON.stringify(paidOrders) === JSON.stringify([B.id]), `orders paid by one payment: ${paidOrders}`);
+      // Webhook path: payment already used on B cannot pay C
+      const { order: C } = await h.co.createOrder(cust, orderInput(pid));
+      await h.co.tx(st => { st.orders.find(o => o.id === C.id)!.gatewayOrderId = paid.razorpay_order_id; });
+      const wh2 = h.gw.webhook('payment.captured', paid.payment); await h.co.handleWebhook(wh2.raw, wh2.headers);
+      ok(!(await state(h)).orders.find(o => o.id === C.id)!.paymentVerified, 'webhook reuse rejected');
+      return [A.id, B.id, C.id];
+    });
+  } },
+  { name: 'review #2: an order objective is not COMPLETED unless the order was delivered', employee: 'AI_BOSS', level: 'REGRESSION', async run() {
+    return withH({}, async h => {
+      const cust = await h.customer(); const pid = await h.activeProduct();
+      const { order, checkout } = await h.co.createOrder(cust, orderInput(pid));
+      await h.co.confirmCheckout(cust, order.id, h.gw.pay((checkout as any).gatewayOrderId)); // paid, but no file uploaded
+      const t = await h.co.submitObjective(h.founder, `Build and deliver ${order.id}`);
+      const o = (await state(h)).orders.find(x => x.id === order.id)!;
+      ok(o.status === 'INFO_REQUIRED', `order ${o.status}`);
+      ok(t.status !== 'COMPLETED', `objective task must not be COMPLETED, got ${t.status}`);
+      ok(t.status === 'WAITING', `objective should wait on the customer, got ${t.status}`);
+      return [t.id];
+    });
+  } },
+  { name: 'review #3: login attempts are limited per account, not only per claimed IP', employee: 'AI_SECURITY', level: 'SECURITY', async run() {
+    return withH({}, async h => {
+      let limited = false;
+      for (let i = 0; i < 40; i++) { try { await h.co.login('founder@test.local', 'wrong-password-x', `10.0.0.${i}`); } catch (e) { if ((e as any).code === 'RATE_LIMITED') { limited = true; break; } } }
+      ok(limited, 'rotating IPs must not allow unlimited guesses');
+      const { clientIp } = await import('../../api/company-routes.js');
+      const fake: any = { headers: { 'x-forwarded-for': '1.2.3.4' }, socket: { remoteAddress: '9.9.9.9' } };
+      ok(clientIp(fake, false) === '9.9.9.9', 'X-Forwarded-For ignored unless TW01_TRUST_PROXY');
+      ok(clientIp(fake, true) === '1.2.3.4', 'X-Forwarded-For used behind a trusted proxy');
+      return ['limited'];
+    });
+  } },
+  { name: 'review #4: a payment received after a Founder override is recorded, not lost', employee: 'AI_FINANCE', level: 'REGRESSION', async run() {
+    return withH({}, async h => {
+      const cust = await h.customer(); const pid = await h.activeProduct();
+      const { order, checkout } = await h.co.createOrder(cust, orderInput(pid)); await h.co.uploadFile(cust, order.id, 'x.csv', generatedCsv());
+      const ap = await h.co.requestProductionOverride(h.founder, order.id, 'Start now, customer paying today');
+      await h.co.decideApproval(h.founder, ap.id, 'approve', '');
+      ok((await h.co.runOrderPipeline(order.id)).status === 'DELIVERED', 'delivered under override');
+      const r = await h.co.confirmCheckout(cust, order.id, h.gw.pay((checkout as any).gatewayOrderId));
+      ok((r as any).verified === true, `late payment verified: ${JSON.stringify(r)}`);
+      const o = (await state(h)).orders.find(x => x.id === order.id)!;
+      ok(o.paymentVerified && o.status === 'DELIVERED', `paymentVerified=${o.paymentVerified} status=${o.status}`);
+      const rf = await h.co.requestRefund(h.founder, order.id, { reason: 'Partial goodwill refund', amount: 1000 });
+      ok(rf.status === 'PENDING', 'refund possible once payment recorded');
+      return [order.id];
+    });
+  } },
+  { name: 'review #5: delivery task is not COMPLETED when the customer was not notified', employee: 'AI_DASHBOARD', level: 'REGRESSION', async run() {
+    return withH({ mailer: false }, async h => {
+      const { cust, orderId } = await paidOrder(h);
+      const r = await h.co.runOrderPipeline(orderId);
+      ok(r.status === 'DELIVERED', `files available in portal: ${r.status}`);
+      ok((await h.co.myOrder(cust, orderId)).deliverables.dashboard, 'customer can download');
+      const t = (await state(h)).tasks.find(x => x.orderId === orderId && x.type === 'DELIVERY')!;
+      ok(t.status !== 'COMPLETED', `delivery task must not claim completion without a sent email, got ${t.status}`);
+      ok(t.status === 'ESCALATED' && /not notified|NOT_CONFIGURED/.test(t.errors.join(' ')), `escalated with reason: ${t.errors}`);
+      return [t.id];
+    });
+  } },
+  { name: 'review #6: the build uses exactly the file that passed validation', employee: 'AI_DASHBOARD', level: 'SECURITY', async run() {
+    return withH({}, async h => {
+      const { cust, orderId } = await paidOrder(h);
+      const render = (await state(h)).tools.find(t => t.name === 'dashboard.render')!;
+      const brokenImpl = { def: { ...render, status: undefined, lastTest: undefined } as any, run: () => { throw Object.assign(new Error('render crashed'), { noRetry: true }); }, selfTest: () => null };
+      await h.co.tx(s => h.co.tools.register(s, brokenImpl, 't'));
+      const r1 = await h.co.runOrderPipeline(orderId); ok(/failed/.test(r1.log.join(' ')), `first build should fail: ${r1.log}`);
+      await h.co.uploadFile(cust, orderId, 'late.csv', 'employee_id,gender\nX1,M\n'); // unvalidated, unusable
+      await h.co.tx(s => (h.co as any).registerTools(s));                             // restore real tools
+      const r2 = await h.co.runOrderPipeline(orderId);
+      const s = await state(h); const o = s.orders.find(x => x.id === orderId)!; const b = s.builds.find(x => x.id === o.deliverables.buildId)!;
+      const validated = s.tasks.find(t => t.orderId === orderId && t.type === 'DATA_VALIDATION')!.outputs.fileId;
+      ok(r2.status === 'DELIVERED' && b.dataSha256 === o.files.find(f => f.id === validated)!.sha256 && b.rowCount === 150, `build used ${b?.rowCount} rows; status ${r2.status}`);
+      return [b.id];
+    });
+  } },
+  { name: 'review #7: replaying a signed payment.failed webhook with a new event id changes nothing', employee: 'AI_FINANCE', level: 'SECURITY', async run() {
+    return withH({}, async h => {
+      const c = await h.customer(); const pid = await h.activeProduct();
+      const { order, checkout } = await h.co.createOrder(c, orderInput(pid));
+      const failed = h.gw.pay((checkout as any).gatewayOrderId, { status: 'failed' });
+      const wh = h.gw.webhook('payment.failed', failed.payment, 'evt_first');
+      await h.co.handleWebhook(wh.raw, wh.headers);
+      await h.co.retryPayment(c, order.id);
+      await h.co.handleWebhook(wh.raw, { ...wh.headers, 'x-razorpay-event-id': 'evt_replayed' });
+      const s = await state(h); const o = s.orders.find(x => x.id === order.id)!;
+      ok(o.status === 'AWAITING_PAYMENT', `replay flipped order to ${o.status}`);
+      ok(s.emails.filter(e => e.orderId === order.id && e.template === 'PAYMENT_FAILED').length === 1, 'no second failure email');
+      return [order.id];
+    });
+  } },
+
+  // ------------------------------------------------------------------ Second review pass (2026-09-27)
+  { name: 'review #8: failed logins from strangers cannot lock the Founder out of a known device', employee: 'AI_SECURITY', level: 'SECURITY', async run() {
+    return withH({}, async h => {
+      for (let i = 0; i < 30; i++) { try { await h.co.login('founder@test.local', 'wrong-password-x', `198.51.100.${i}`); } catch { /* expected */ } }
+      const r = await h.co.login('founder@test.local', 'founder-test-password-1', 'test'); // 'test' = the Founder's earlier successful IP
+      ok(!!r.token, 'Founder still signs in from a known device');
+      return ['not locked out'];
+    });
+  } },
+  { name: 'review #9: a failed payment claim on an order in production is recorded, not lost', employee: 'AI_FINANCE', level: 'FAILURE', async run() {
+    return withH({}, async h => {
+      const cust = await h.customer(); const pid = await h.activeProduct();
+      const { order, checkout } = await h.co.createOrder(cust, orderInput(pid)); await h.co.uploadFile(cust, order.id, 'x.csv', generatedCsv());
+      const ap = await h.co.requestProductionOverride(h.founder, order.id, 'Start now, invoice follows'); await h.co.decideApproval(h.founder, ap.id, 'approve', '');
+      await h.co.runOrderPipeline(order.id);
+      const failed = h.gw.pay((checkout as any).gatewayOrderId, { status: 'failed' });
+      const r = await h.co.claimPayment(cust, order.id, { paymentId: failed.razorpay_payment_id });
+      ok(r.status === 'REJECTED', `claim ${JSON.stringify(r)}`);
+      const s = await state(h); const o = s.orders.find(x => x.id === order.id)!;
+      ok(o.status === 'DELIVERED' && s.claims.some(c => c.orderId === order.id && c.status === 'REJECTED'), `status ${o.status}, claims ${s.claims.length}`);
+      return [order.id];
+    });
+  } },
+  { name: 'review #10: behind a trusted proxy the proxy-appended address is used', employee: 'AI_SECURITY', level: 'REGRESSION', async run() {
+    const { clientIp } = await import('../../api/company-routes.js');
+    const req: any = { headers: { 'x-forwarded-for': '6.6.6.6, 203.0.113.9' }, socket: { remoteAddress: '10.0.0.2' } };
+    ok(clientIp(req, true) === '203.0.113.9', `got ${clientIp(req, true)}`);
+    return ['rightmost'];
+  } },
+  { name: 'review #11: a second payment on an already-paid order is escalated for refund', employee: 'AI_FINANCE', level: 'REGRESSION', async run() {
+    return withH({}, async h => {
+      const cust = await h.customer(); const pid = await h.activeProduct();
+      const { order, checkout } = await h.co.createOrder(cust, orderInput(pid));
+      const first = h.gw.pay((checkout as any).gatewayOrderId);
+      await h.co.confirmCheckout(cust, order.id, first);
+      const second = h.gw.pay((checkout as any).gatewayOrderId);
+      const wh = h.gw.webhook('payment.captured', second.payment); await h.co.handleWebhook(wh.raw, wh.headers);
+      const s = await state(h);
+      const t = s.tasks.find(x => x.type === 'DUPLICATE_PAYMENT' && x.orderId === order.id);
+      ok(t && t.status === 'ESCALATED' && t.agent === 'AI_FINANCE' && JSON.stringify(t.inputs).includes(second.razorpay_payment_id), `duplicate task ${JSON.stringify(t)}`);
+      ok(s.orders.find(x => x.id === order.id)!.paymentId === first.razorpay_payment_id, 'first payment stays the order payment');
+      await h.co.handleWebhook(wh.raw, { ...wh.headers, 'x-razorpay-event-id': 'again' });
+      ok((await state(h)).tasks.filter(x => x.type === 'DUPLICATE_PAYMENT').length === 1, 'flagged once');
+      return [t!.id];
+    });
+  } },
 ];
 
 export async function runScenarios(filter?: (s: Scenario) => boolean): Promise<TestResult[]> {

@@ -17,7 +17,12 @@ async function readJson(req: IncomingMessage, limit = MAX_JSON): Promise<any> {
   try { return JSON.parse(raw.toString('utf8')); } catch { throw new CompanyError('VALIDATION', 'Body must be JSON.'); }
 }
 export const bearer = (req: IncomingMessage) => { const h = String(req.headers.authorization ?? ''); return h.startsWith('Bearer ') ? h.slice(7).trim() : null; };
-const clientIp = (req: IncomingMessage) => String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim() || req.socket.remoteAddress || 'unknown';
+/** Client IP for rate limiting. X-Forwarded-For is client-controlled, so it is used only when TW01_TRUST_PROXY=true (behind your own proxy). */
+export function clientIp(req: IncomingMessage, trustProxy = process.env.TW01_TRUST_PROXY === 'true') {
+  // Proxies append to X-Forwarded-For, so the right-most entry is the one your own proxy added; earlier entries are client-supplied.
+  const fwd = trustProxy ? String(req.headers['x-forwarded-for'] ?? '').split(',').map(x => x.trim()).filter(Boolean).at(-1) ?? '' : '';
+  return fwd || req.socket.remoteAddress || 'unknown';
+}
 
 function headers(co: Company, req: IncomingMessage, extra: Record<string, string> = {}) {
   const h: Record<string, string> = { 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'cache-control': 'no-store', 'x-frame-options': 'DENY', ...extra };

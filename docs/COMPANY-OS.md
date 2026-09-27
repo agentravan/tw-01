@@ -7,11 +7,12 @@ The Company OS runs the dashboard business end to end: customer order → online
 | Rule | Where |
 |---|---|
 | No production before a gateway-verified payment, unless the Founder approves a recorded 🔴 override for that exact order | `Company.productionGate`, `Company.setStatus` |
-| A payment is verified only if the checkout HMAC is valid **and** Razorpay reports the payment `captured`, for this order, for the exact amount, in INR, and not already used by another order | `Company.confirmCheckout`, `Company.verifyWithGateway` |
-| Webhooks are trusted only via HMAC over the raw body; duplicate `x-razorpay-event-id`s are ignored | `Company.handleWebhook`, `Razorpay.verifyWebhook` |
+| A payment is verified only if the checkout HMAC is valid **and** Razorpay reports the payment `captured`, made against a gateway order TW-01 opened for this order, for the exact amount, in INR, and not already used by another order. This applies on every path: checkout, webhook and claim | `Company.confirmCheckout`, `Company.verifyWithGateway` |
+| Webhooks are trusted only via HMAC over the raw body. Duplicates are ignored by event id **and** by signed content (event + payment id), because the event-id header is not signed | `Company.handleWebhook`, `Razorpay.verifyWebhook` |
 | A customer's payment claim is decided by the gateway. A screenshot never marks an order paid | `Company.claimPayment` |
-| A task completes only with evidence that resolves to a real record, via a QA decision by a **different** employee | `company/tasks.ts` |
+| A task completes only with evidence that resolves to a real record (an email counts only if it was actually SENT), via a QA decision by a **different** employee. Delivery without a sent notification email is escalated to the Founder | `company/tasks.ts` |
 | Retries are bounded (default 3), then the task is ESCALATED to the Founder | `failTask` |
+| A second captured payment on an already-paid order is recorded and escalated to the Founder as a refund review (once per payment) | `flagDuplicatePayment` |
 | 🟢 runs automatically, 🟡 needs Founder approval (refunds, pricing, production changes), 🔴 always needs the Founder (overrides, deletes, contracts, large payments ≥ ₹50,000). Unknown actions fail closed as 🔴 | `company/approvals.ts` |
 | Every action, including denied attempts, goes into an append-only SHA-256 hash-chained audit log | `company/audit.ts` |
 | Customers only ever see their own orders and customer-facing statuses | `requireOwner`, `customerView` |
@@ -54,7 +55,9 @@ The **PRODUCTION** level comes only from `POST /api/co/admin/verify-production` 
 
 Payment scenarios use `company/testing/gateway-double.ts`, a test double of the three Razorpay endpoints TW-01 calls. It signs exactly as Razorpay documents, so the real verification code runs unchanged. It is never wired into the server, and it cannot produce PRODUCTION results.
 
-`npm run e2e` starts the real server as a separate process and drives 38 checks over HTTP.
+`npm run e2e` starts the real server as a separate process and drives 41 checks over HTTP.
+
+Two independent review passes on 2026-09-27 found 11 defects: 7, then 4 more, two of which the first fixes introduced. Each now has a `review #n` scenario that failed before its fix. Mutation testing (11 deliberately injected bugs) confirms the scenarios catch regressions.
 
 ## Configuration
 
@@ -72,6 +75,6 @@ Payment scenarios use `company/testing/gateway-double.ts`, a test double of the 
 
 - **Persistence** is still the JSON file. It is fine on a VPS or Docker volume, but not on Vercel's serverless disk. A Postgres adapter is the next step before a Vercel deployment.
 - **Uploads and deliverables** are stored on local disk under `data/`. Serverless hosting needs object storage (for example Vercel Blob or Supabase Storage).
-- **Rate limiting** is in-memory, so it applies per process.
+- **Rate limiting** is in-memory, so it applies per process. Limits apply per IP, and per account for devices that have not signed in before, so a stranger cannot lock the Founder out of a known device. The known-device list is in memory, so after a restart the Founder may briefly be limited like anyone else. `X-Forwarded-For` is trusted only with `TW01_TRUST_PROXY=true`.
 - **Build engines** exist only for the employee-master family: HR Master, Headcount, Attrition, Diversity and CHRO. Payroll, Attendance, Recruitment, Compliance, F&F and Custom need their own data schemas and builders.
 - **Dropshipping, HR services and the remaining nine employees** are not implemented.

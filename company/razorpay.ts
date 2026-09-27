@@ -13,7 +13,7 @@ export interface RazorpayConfig { keyId: string; keySecret: string; webhookSecre
 export type Fetch = typeof fetch;
 
 export interface GatewayOrder { id: string; entity: 'order'; amount: number; amount_paid: number; amount_due: number; currency: string; receipt: string; status: 'created' | 'attempted' | 'paid'; created_at: number; }
-export interface GatewayPayment { id: string; entity: 'payment'; amount: number; currency: string; status: 'created' | 'authorized' | 'captured' | 'refunded' | 'failed'; order_id: string | null; method: string; captured: boolean; error_code: string | null; error_description: string | null; created_at: number; }
+export interface GatewayPayment { id: string; entity: 'payment'; amount: number; currency: string; status: 'created' | 'authorized' | 'captured' | 'refunded' | 'failed'; order_id: string | null; method: string; captured: boolean; error_code: string | null; error_description: string | null; created_at: number; notes?: Record<string, string>; }
 
 export function configFromEnv(env: NodeJS.ProcessEnv = process.env): RazorpayConfig | null {
   const keyId = env.RAZORPAY_KEY_ID ?? '', keySecret = env.RAZORPAY_KEY_SECRET ?? '', webhookSecret = env.RAZORPAY_WEBHOOK_SECRET ?? '';

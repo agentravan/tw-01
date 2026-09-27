@@ -48,6 +48,10 @@ export class Company {
   readonly store: JsonStore; readonly razorpay: Razorpay; readonly mailer: Mailer; readonly clock: Clock; readonly dataDir: string; readonly supportEmail: string; readonly allowedOrigin: string; readonly env: NodeJS.ProcessEnv;
   readonly tools = new ToolRuntime();
   readonly loginLimiter = new RateLimiter(8, 10 * 60_000);
+  /** Per-account limit, independent of the (spoofable) client IP. */
+  readonly accountLimiter = new RateLimiter(20, 15 * 60_000);
+  /** IPs that have signed in successfully per account (in memory). They bypass the per-account limit, so strangers cannot lock the owner out. */
+  private knownIps = new Map<string, Set<string>>();
   readonly registerLimiter = new RateLimiter(5, 60 * 60_000);
   private initialized = false;
 
@@ -153,13 +157,13 @@ export class Company {
     });
   }
   async login(emailIn: unknown, password: unknown, ip: string) {
-    const em = vEmail(emailIn); this.loginLimiter.check(`${ip}|${em}`);
+    const em = vEmail(emailIn); if (!this.knownIps.get(em)?.has(ip)) this.accountLimiter.check(em); this.loginLimiter.check(`${ip}|${em}`);
     return this.tx(s => {
       const u = s.users.find(x => x.email === em && !x.disabled);
       // Always run scrypt so response time does not reveal whether the email exists.
       const ok = verifyPassword(String(password ?? ''), u?.passwordHash ?? hashPassword('dummy-password-for-timing'));
       if (!u || !ok) { this.audit(s, null, { what: 'auth.login', result: 'DENIED', detail: `failed login for ${em}` }); fail('UNAUTHENTICATED', 'Email or password is incorrect.'); }
-      this.loginLimiter.reset(`${ip}|${em}`);
+      this.loginLimiter.reset(`${ip}|${em}`); this.knownIps.set(em, new Set([...(this.knownIps.get(em) ?? []), ip].slice(-20)));
       this.audit(s, { kind: 'user', id: u!.id, role: u!.role }, { what: 'auth.login' });
       return { token: createSession(s, u!, this.clock.now()), user: { id: u!.id, name: u!.name, role: u!.role } };
     });
@@ -255,7 +259,7 @@ export class Company {
       return { status: 'NOT_CONFIGURED' as const, message: 'Online payment is not configured yet. The order is saved and will stay unpaid.' };
     }
     const g = await this.razorpay.createOrder(Math.round(o.amount * 100), o.id, { tw01_order_id: o.id });
-    o.gatewayOrderId = g.id;
+    o.gatewayOrderId = g.id; o.gatewayOrderIds = [...(o.gatewayOrderIds ?? []), g.id];
     this.audit(s, agent('AI_FINANCE'), { what: 'gateway.order', entity: 'order', entityId: o.id, detail: `razorpay order ${g.id} (${g.amount} paise)` });
     return { status: 'READY' as const, keyId: this.razorpay.keyId, gatewayOrderId: g.id, amountPaise: g.amount, currency: 'INR', mode: this.razorpay.mode };
   }
@@ -293,8 +297,9 @@ export class Company {
     if (!this.razorpay.configured) fail('NOT_CONFIGURED', 'Online payment is not configured.');
     return this.tx(async s => {
       const o = this.getOrder(s, a, orderId);
-      if (o.paymentVerified) return { status: o.status, alreadyPaid: true };
-      const sigOk = !!o.gatewayOrderId && rpOrder === o.gatewayOrderId && this.razorpay.verifyCheckoutSignature(o.gatewayOrderId, rpPay, sig);
+      const mine = new Set([...(o.gatewayOrderIds ?? []), ...(o.gatewayOrderId ? [o.gatewayOrderId] : [])]);
+      const sigOk = mine.has(rpOrder) && this.razorpay.verifyCheckoutSignature(rpOrder, rpPay, sig);
+      if (o.paymentVerified) { if (sigOk && rpPay !== o.paymentId) this.flagDuplicatePayment(s, o, rpPay, null, 'checkout'); return { status: o.status, alreadyPaid: true, verified: rpPay === o.paymentId }; }
       if (!sigOk) {
         s.payments.push(this.payRec(o, 'CHECKOUT', rpOrder, rpPay, false, null, null, null, false, 'signature invalid or order mismatch'));
         this.audit(s, agent('AI_FINANCE'), { what: 'payment.checkout', entity: 'order', entityId: o.id, result: 'DENIED', detail: 'signature invalid or order mismatch' });
@@ -315,24 +320,48 @@ export class Company {
     const expected = Math.round(o.amount * 100);
     const problems: string[] = [];
     if (gp.status !== 'captured') problems.push(`gateway status is ${gp.status}`);
-    if (o.gatewayOrderId && gp.order_id !== o.gatewayOrderId) problems.push('payment belongs to a different order');
-    if (!o.gatewayOrderId && gp.order_id) { /* claim on an order opened without gateway order: accept only if notes match below */ }
+    const binding = this.bindingProblem(s, o, gp.order_id, gp.id, gp.notes);
+    if (binding) problems.push(binding);
     if (gp.amount !== expected) problems.push(`amount ${gp.amount} paise ≠ expected ${expected}`);
     if (gp.currency !== 'INR') problems.push(`currency ${gp.currency}`);
-    if (s.payments.some(p => p.verified && p.razorpay_payment_id === gp.id && p.orderId !== o.id)) problems.push('payment already used for another order');
     const verified = problems.length === 0;
     const rec = this.payRec(o, source, gp.order_id, gp.id, sig, gp.status, gp.amount, gp.method, verified, verified ? null : problems.join('; ') + (gp.error_description ? ` (${gp.error_description})` : ''), `tool_execution:${execId}`);
     s.payments.push(rec);
     this.audit(s, fin, { what: 'payment.verify', tool: 'razorpay.fetch_payment', entity: 'order', entityId: o.id, result: verified ? 'OK' : 'DENIED', detail: verified ? `${gp.id} captured ₹${gp.amount / 100} via ${gp.method}` : problems.join('; ') });
     if (verified) await this.markPaid(s, o, rec);
-    else if (gp.status === 'failed' && o.status !== 'PAYMENT_FAILED') { this.setStatus(s, o, 'PAYMENT_FAILED', fin, gp.error_description ?? 'payment failed'); await this.email(s, 'AI_FINANCE', 'PAYMENT_FAILED', o, { reason: gp.error_description ?? 'payment failed' }); }
+    else if (gp.status === 'failed' && ['AWAITING_PAYMENT', 'PAYMENT_REVIEW'].includes(o.status)) { this.setStatus(s, o, 'PAYMENT_FAILED', fin, gp.error_description ?? 'payment failed'); await this.email(s, 'AI_FINANCE', 'PAYMENT_FAILED', o, { reason: gp.error_description ?? 'payment failed' }); }
     return { status: o.status, verified, problems };
+  }
+  /**
+   * A payment belongs to an order only if Razorpay says it was made against one of the gateway orders
+   * TW-01 opened for that order (or carries this order's id in its notes), and no other order already used it.
+   */
+  private bindingProblem(s: CompanyState, o: Order, gatewayOrderId: string | null, paymentId: string, notes?: Record<string, string>): string | null {
+    const mine = new Set([...(o.gatewayOrderIds ?? []), ...(o.gatewayOrderId ? [o.gatewayOrderId] : [])]);
+    const bound = (gatewayOrderId && mine.has(gatewayOrderId)) || notes?.tw01_order_id === o.id;
+    if (!bound) return 'payment was not made for this order';
+    if (s.payments.some(p => p.verified && p.razorpay_payment_id === paymentId && p.orderId !== o.id)) return 'payment already used for another order';
+    return null;
+  }
+  /** A second captured payment on an order that is already paid: record it and escalate a refund review (once per payment). */
+  private flagDuplicatePayment(s: CompanyState, o: Order, paymentId: string, amountPaise: number | null, source: string) {
+    if (!paymentId || paymentId === o.paymentId) return;
+    if (s.tasks.some(t => t.type === 'DUPLICATE_PAYMENT' && t.inputs.paymentId === paymentId)) return;
+    const t = createTask(s, { title: `Duplicate payment ${paymentId} on ${o.id}: refund review needed`, type: 'DUPLICATE_PAYMENT', agent: 'AI_FINANCE', priority: 'HIGH', orderId: o.id, inputs: { paymentId, amountPaise, source, orderPaymentId: o.paymentId }, createdBy: 'agent:ai-finance', at: this.now(), maxRetries: 0 });
+    moveTask(s, t, 'WAITING', 'agent:ai-finance', this.now(), 'customer paid twice');
+    moveTask(s, t, 'ESCALATED', 'agent:ai-finance', this.now(), 'Founder decision: refund the extra payment (refunds need approval)');
+    this.audit(s, agent('AI_FINANCE'), { what: 'payment.duplicate', entity: 'order', entityId: o.id, taskId: t.id, result: 'FAILED', detail: `${paymentId} (${source}) arrived after ${o.paymentId}; escalated ${t.id}` });
   }
   private async markPaid(s: CompanyState, o: Order, rec: PaymentRecord) {
     o.paymentVerified = true; o.paymentId = rec.razorpay_payment_id;
-    this.setStatus(s, o, 'PAID', agent('AI_FINANCE'), `payment ${rec.razorpay_payment_id} verified (${rec.source})`);
+    if (['AWAITING_PAYMENT', 'PAYMENT_FAILED', 'PAYMENT_REVIEW'].includes(o.status)) {
+      this.setStatus(s, o, 'PAID', agent('AI_FINANCE'), `payment ${rec.razorpay_payment_id} verified (${rec.source})`);
+      this.planOrderTasks(s, o);
+    } else {
+      // Work already started under a Founder override: record the payment without rewinding the order.
+      this.audit(s, agent('AI_FINANCE'), { what: 'payment.received_after_override', entity: 'order', entityId: o.id, detail: `payment ${rec.razorpay_payment_id} verified while order is ${o.status}` });
+    }
     await this.email(s, 'AI_FINANCE', 'PAYMENT_SUCCESSFUL', o, { paymentId: rec.razorpay_payment_id ?? '' });
-    this.planOrderTasks(s, o);
   }
 
   /** Razorpay webhook. Trust comes only from the HMAC over the raw body; duplicates are ignored by event id. */
@@ -344,24 +373,29 @@ export class Company {
       if (!valid) { this.audit(s, gw, { what: 'webhook.rejected', result: 'DENIED', detail: 'invalid X-Razorpay-Signature' }); return fail('UNAUTHENTICATED', 'invalid signature'); }
       let body: any; try { body = JSON.parse(raw.toString('utf8')); } catch { return fail('VALIDATION', 'invalid JSON'); }
       const id = eventId || `${body.event}:${body.payload?.payment?.entity?.id ?? ''}:${body.created_at ?? ''}`;
-      if (s.webhookEvents.some(e => e.eventId === id && e.processed)) { return { duplicate: true }; }
-      const ev = { eventId: id, event: String(body.event), receivedAt: this.now(), signatureValid: true, processed: false, note: '' };
+      // The event-id header is not signed, so also dedupe on the signed content (event + payment id).
+      const contentKey = `${body.event}:${body.payload?.payment?.entity?.id ?? ''}`;
+      if (s.webhookEvents.some(e => e.processed && (e.eventId === id || e.note.startsWith(`key=${contentKey};`)))) { return { duplicate: true }; }
+      const ev = { eventId: id, event: String(body.event), receivedAt: this.now(), signatureValid: true, processed: false, note: `key=${contentKey};` };
       s.webhookEvents.push(ev);
       const p = body.payload?.payment?.entity;
       const orderRef = p?.notes?.tw01_order_id as string | undefined;
-      const o = s.orders.find(x => (p?.order_id && x.gatewayOrderId === p.order_id) || (orderRef && x.id === orderRef));
-      if (!o) { ev.note = 'no matching order'; ev.processed = true; this.audit(s, gw, { what: `webhook.${ev.event}`, detail: 'no matching order' }); return { ok: true, matched: false }; }
-      if (body.event === 'payment.captured' && !o.paymentVerified) {
+      const o = s.orders.find(x => (p?.order_id && (x.gatewayOrderId === p.order_id || (x.gatewayOrderIds ?? []).includes(p.order_id))) || (orderRef && x.id === orderRef));
+      if (!o) { ev.note += ' no matching order'; ev.processed = true; this.audit(s, gw, { what: `webhook.${ev.event}`, detail: 'no matching order' }); return { ok: true, matched: false }; }
+      if (body.event === 'payment.captured' && o.paymentVerified && p?.id && p.id !== o.paymentId && !this.bindingProblem(s, o, p.order_id ?? null, p.id, p.notes)) {
+        this.flagDuplicatePayment(s, o, p.id, p.amount ?? null, 'webhook');
+      } else if (body.event === 'payment.captured' && !o.paymentVerified) {
         // Webhook body is authenticated by HMAC; still confirm amount/order before marking paid.
         const expected = Math.round(o.amount * 100); const problems: string[] = [];
         if (p.amount !== expected) problems.push(`amount ${p.amount} ≠ ${expected}`);
-        if (o.gatewayOrderId && p.order_id !== o.gatewayOrderId) problems.push('order mismatch');
+        const binding = this.bindingProblem(s, o, p.order_id ?? null, p.id, p.notes);
+        if (binding) problems.push(binding);
         if (p.currency !== 'INR') problems.push(`currency ${p.currency}`);
         const rec = this.payRec(o, 'WEBHOOK', p.order_id ?? null, p.id, true, 'captured', p.amount, p.method ?? null, problems.length === 0, problems.join('; ') || null, `webhook:${id}`);
         s.payments.push(rec);
         this.audit(s, gw, { what: 'webhook.payment.captured', entity: 'order', entityId: o.id, result: problems.length ? 'DENIED' : 'OK', detail: problems.join('; ') || p.id });
-        if (!problems.length && ['AWAITING_PAYMENT', 'PAYMENT_FAILED', 'PAYMENT_REVIEW'].includes(o.status)) await this.markPaid(s, o, rec);
-      } else if (body.event === 'payment.failed' && !o.paymentVerified && o.status === 'AWAITING_PAYMENT') {
+        if (!problems.length && !['REFUNDED', 'CANCELLED', 'REFUND_REQUESTED'].includes(o.status)) await this.markPaid(s, o, rec);
+      } else if (body.event === 'payment.failed' && !o.paymentVerified && o.status === 'AWAITING_PAYMENT' && p.order_id === o.gatewayOrderId) {
         s.payments.push(this.payRec(o, 'WEBHOOK', p.order_id ?? null, p.id, true, 'failed', p.amount, p.method ?? null, false, p.error_description ?? 'failed', `webhook:${id}`));
         this.setStatus(s, o, 'PAYMENT_FAILED', gw, p.error_description ?? 'payment failed');
         await this.email(s, 'AI_FINANCE', 'PAYMENT_FAILED', o, { reason: p.error_description ?? 'payment failed' });
@@ -387,8 +421,11 @@ export class Company {
     const paymentId = str(input.paymentId, 'paymentId', { max: 60 });
     return this.tx(async s => {
       const o = this.getOrder(s, a, orderId);
-      if (o.paymentVerified) return { status: 'VERIFIED', note: 'Already paid.' };
-      if (!['AWAITING_PAYMENT', 'PAYMENT_FAILED', 'PAYMENT_REVIEW'].includes(o.status)) fail('BAD_STATE', 'This order does not need a payment.');
+      if (o.paymentVerified) {
+        if (paymentId !== o.paymentId && this.razorpay.configured) { const r = await this.tools.execute<GatewayPayment>(s, 'AI_FINANCE', 'razorpay.fetch_payment', paymentId, { at: () => this.now() }); if (r.output.status === 'captured' && !this.bindingProblem(s, o, r.output.order_id, r.output.id, r.output.notes)) this.flagDuplicatePayment(s, o, r.output.id, r.output.amount, 'claim'); }
+        return { status: 'VERIFIED', note: 'This order is already paid.' };
+      }
+      if (['REFUNDED', 'CANCELLED', 'REFUND_REQUESTED'].includes(o.status)) fail('BAD_STATE', 'This order does not need a payment.');
       const claim = { id: uid('clm'), orderId: o.id, customerId: o.customerId, paymentId, screenshot: null, status: 'PENDING_GATEWAY' as 'PENDING_GATEWAY' | 'VERIFIED' | 'REJECTED', note: '', at: this.now() };
       s.claims.push(claim);
       if (!this.razorpay.configured) {
@@ -540,8 +577,14 @@ export class Company {
       if (t.type === 'DASHBOARD_BUILD') {
         const p = s.products.find(x => x.id === o.productId)!;
         if (p.builder !== 'hr_employee_master') throw Object.assign(new Error(`no build engine for ${p.name}`), { noRetry: true });
-        const f = this.latestFile(o)!; const csv = await readFile(f.path, 'utf8');
+        // Build from exactly the file that passed validation (not whatever was uploaded last), and re-check its integrity.
+        const vt = s.tasks.find(x => x.id === t.dependencies[0]);
+        const f = o.files.find(x => x.id === vt?.outputs.fileId);
+        if (!f) throw Object.assign(new Error('validated file not found'), { noRetry: true });
+        const csv = await readFile(f.path, 'utf8');
+        if (sha256(csv) !== f.sha256) throw Object.assign(new Error(`stored file ${f.id} does not match its recorded hash`), { noRetry: true });
         const v = await this.tools.execute<ValidationResult>(s, 'AI_DASHBOARD', 'csv.validate', csv, { taskId: t.id, at });
+        if (!v.output.ok) throw Object.assign(new Error('validated file no longer validates'), { noRetry: true });
         const emps = v.output.employees; const asOf = dataAsOf(emps); const buildId = uid('bld');
         const c = this.customerOf(s, o);
         const r = await this.tools.execute<ReturnType<typeof renderHrDashboard>>(s, 'AI_DASHBOARD', 'dashboard.render', { buildId, productName: p.name, company: c.company, employees: emps, asOf, kpiKeys: p.kpis as (keyof KpiSet)[] }, { taskId: t.id, at });
@@ -578,14 +621,22 @@ export class Company {
         if (!o.deliverables.buildId) throw new Error('no QA-passed build to deliver');
         const qaOk = s.qaReports.some(r => r.buildId === o.deliverables.buildId && r.passed);
         if (!qaOk) throw Object.assign(new Error('build has no passing QA report'), { noRetry: true });
-        const mail = await this.email(s, 'AI_DASHBOARD', 'DASHBOARD_DELIVERED', o);
-        addEvidence(s, t, { kind: 'email', ref: mail.id, note: `delivery email ${mail.status}` });
-        addEvidence(s, t, { kind: 'file', ref: o.deliverables.buildId, note: 'delivered build' });
-        moveTask(s, t, 'QA', me, at());
         const files = await Promise.all([o.deliverables.dashboard!, o.deliverables.guide!].map(p => readFile(p).then(b => b.length > 0, () => false)));
-        qaDecision(s, t, 'AI_QA', files.every(Boolean), files.every(Boolean) ? 'deliverable files exist' : 'deliverable files missing', at(), qa);
-        if (t.status !== 'COMPLETED') throw new Error('deliverable files missing');
-        this.setStatus(s, o, 'DELIVERED', agent('AI_DASHBOARD'), `build ${o.deliverables.buildId} delivered (email ${mail.status})`);
+        if (!files.every(Boolean)) throw new Error('deliverable files missing');
+        // Files are now downloadable from the portal: that is the delivery.
+        this.setStatus(s, o, 'DELIVERED', agent('AI_DASHBOARD'), `build ${o.deliverables.buildId} available in the customer portal`);
+        const mail = await this.email(s, 'AI_DASHBOARD', 'DASHBOARD_DELIVERED', o);
+        addEvidence(s, t, { kind: 'file', ref: o.deliverables.buildId, note: 'delivered build' });
+        if (mail.status !== 'SENT') {
+          // The task claims "customer notified". Without a sent email that claim would be false: escalate instead.
+          t.maxRetries = 0;
+          failTask(s, t, `customer not notified: delivery email ${mail.status}${mail.error ? ' (' + mail.error + ')' : ''}; files are in the portal, notify the customer manually`, me, at());
+          log.push(`delivered to portal; customer NOT notified (email ${mail.status}) → escalated`);
+          return true;
+        }
+        addEvidence(s, t, { kind: 'email', ref: mail.id, note: 'delivery email SENT' });
+        moveTask(s, t, 'QA', me, at());
+        qaDecision(s, t, 'AI_QA', true, 'deliverable files exist and delivery email was sent', at(), qa);
         log.push('delivered');
         return true;
       }
@@ -664,8 +715,11 @@ export class Company {
     // Execute
     if (execType === 'ORDER_PIPELINE' && orderRef) {
       const r = await this.runOrderPipeline(orderRef).catch(e => ({ status: 'ERROR', log: [(e as Error).message] }));
-      const advanced = !r.log.some(l => /fail|blocked|error|paused|not found/i.test(l));
-      await this.tx(s => { const t = s.tasks.find(x => x.id === taskId)!; this.finishObjectiveTask(s, t, r.log.join('; '), s.audit.filter(x => x.entityId === orderRef).at(-1)?.id ?? null, advanced); });
+      await this.tx(s => {
+        const t = s.tasks.find(x => x.id === taskId)!; const o = s.orders.find(x => x.id === orderRef);
+        const statusEvent = s.audit.filter(x => x.entityId === orderRef && x.what === 'order.status').at(-1)?.id ?? null;
+        this.finishObjectiveTask(s, t, r.log.join('; '), statusEvent, o?.status ?? 'NOT_FOUND');
+      });
     } else if (execType === 'SECURITY_SCAN') {
       await this.tx(async s => {
         const t = s.tasks.find(x => x.id === taskId)!; moveTask(s, t, 'IN_PROGRESS', 'agent:ai-security', this.now());
@@ -693,14 +747,18 @@ export class Company {
     }
     return this.read(s => s.tasks.find(x => x.id === taskId)!);
   }
-  private finishObjectiveTask(s: CompanyState, t: Task, summary: string, auditId: string | null, advanced: boolean) {
+  /** An order objective is COMPLETED only when the order is DELIVERED. Waiting on the customer or payment → WAITING; anything else → ESCALATED. */
+  private finishObjectiveTask(s: CompanyState, t: Task, summary: string, statusEventId: string | null, orderStatus: string) {
     moveTask(s, t, 'IN_PROGRESS', 'agent:ai-dashboard', this.now());
-    t.outputs = { summary };
-    if (auditId) addEvidence(s, t, { kind: 'audit', ref: auditId, note: 'latest order event' });
-    if (!t.evidence.length) { failTask(s, t, 'no evidence produced', 'agent:ai-dashboard', this.now()); return; }
-    moveTask(s, t, 'QA', 'agent:ai-dashboard', this.now());
-    qaDecision(s, t, 'AI_QA', advanced, advanced ? 'pipeline advanced; evidence recorded' : `pipeline did not advance: ${clip(summary, 160)}`, this.now(), 'agent:ai-qa');
-    if (t.status !== 'COMPLETED') { t.maxRetries = 0; failTask(s, t, clip(summary, 300), 'agent:ai-dashboard', this.now()); }
+    t.outputs = { summary, orderStatus };
+    if (statusEventId) addEvidence(s, t, { kind: 'audit', ref: statusEventId, note: `order status ${orderStatus}` });
+    if (orderStatus === 'DELIVERED' && t.evidence.length) {
+      moveTask(s, t, 'QA', 'agent:ai-dashboard', this.now());
+      qaDecision(s, t, 'AI_QA', true, 'order status is DELIVERED', this.now(), 'agent:ai-qa');
+      return;
+    }
+    if (['INFO_REQUIRED', 'AWAITING_PAYMENT', 'PAYMENT_FAILED', 'PAYMENT_REVIEW'].includes(orderStatus)) { moveTask(s, t, 'WAITING', 'agent:ai-boss', this.now(), `order is ${orderStatus}: ${clip(summary, 200)}`); return; }
+    t.maxRetries = 0; failTask(s, t, `order is ${orderStatus}: ${clip(summary, 250)}`, 'agent:ai-dashboard', this.now());
   }
 
   // ---------------------------------------------------------------- security officer
