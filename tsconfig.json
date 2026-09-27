@@ -9,5 +9,23 @@
     "forceConsistentCasingInFileNames": true,
     "noEmit": true
   },
-  "include": ["agents/**/*.ts", "api/**/*.ts", "crm/**/*.ts", "integrations/**/*.ts", "memory/**/*.ts", "skills/**/*.ts", "src/**/*.ts", "tools/**/*.ts", "tests/**/*.ts"]
+  "include": [
+    "agents/**/*.ts",
+    "ai/**/*.ts",
+    "api/**/*.ts",
+    "company/**/*.ts",
+    "control-room/**/*.ts",
+    "crm/**/*.ts",
+    "integrations/**/*.ts",
+    "memory/**/*.ts",
+    "organization/**/*.ts",
+    "reports/**/*.ts",
+    "sales/**/*.ts",
+    "scripts/**/*.ts",
+    "skills/**/*.ts",
+    "src/**/*.ts",
+    "strategy/**/*.ts",
+    "tests/**/*.ts",
+    "tools/**/*.ts"
+  ]
 }

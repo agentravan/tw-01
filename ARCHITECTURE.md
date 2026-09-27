@@ -27,3 +27,19 @@ Every operation exposes one of: `WORKING`, `CONNECTED`, `NOT_CONFIGURED`, `DISAB
 ## Legal and operational constraints
 
 Use only permitted public sources. Obtain consent where required, honour opt-outs immediately, identify the business honestly, and follow applicable privacy, telecom, anti-spam and employment-law requirements. Voice recording/transcription is opt-in and consent-based only.
+
+## Company OS
+
+```text
+Portal / Console ─► /api/co/* ─► Company (company/service.ts)
+                                   ├─ auth (scrypt, hashed sessions) + RBAC (company/rbac.ts)
+                                   ├─ approvals 🟢/🟡/🔴 (company/approvals.ts)
+                                   ├─ task engine with evidence + independent QA (company/tasks.ts)
+                                   ├─ tool registry with self-tests + execution log (company/tools.ts)
+                                   ├─ Razorpay client (company/razorpay.ts) ─► api.razorpay.com
+                                   ├─ Specialist tools: csv / hr-kpi / dashboard-build / guide
+                                   ├─ QA officer: independent recompute (company/qa.ts)
+                                   └─ hash-chained audit log (company/audit.ts)
+```
+
+All company state lives in `State.company` inside the same JSON store. Every command runs inside one serialized store transaction, so a failed command changes nothing. Order status is only changed in `Company.setStatus`, which applies the transition table and the production gate. See [docs/COMPANY-OS.md](docs/COMPANY-OS.md).
