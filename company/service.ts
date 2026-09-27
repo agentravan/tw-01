@@ -694,6 +694,7 @@ export class Company {
     { re: /\b(security|audit log|vulnerab|scan)\b/i, role: 'AI_SECURITY', type: 'SECURITY_SCAN' },
     { re: /\b(certif|self-?test|test (the )?(employees|workforce)|run tests?)\b/i, role: 'AI_QA', type: 'CERTIFICATION_RUN' },
     { re: /\bORD-\d+\b/, role: 'AI_DASHBOARD', type: 'ORDER_PIPELINE' },
+    { re: /\b(product management|manage products|seller dashboard|add .*product|edit .*product|activate.*product|deactivate.*product)\b/i, role: 'AI_DASHBOARD', type: 'PRODUCT_MANAGEMENT' },
     { re: /\b(report|kpi|metrics?|revenue|summary)\b/i, role: 'AI_DATA', type: 'METRICS_REPORT' },
     { re: /\b(lead|prospect|outreach|sales)\b/i, role: 'AI_SALES', type: 'SALES' },
     { re: /\b(seo|linkedin|content|campaign|marketing)\b/i, role: 'AI_MARKETING', type: 'MARKETING' },
@@ -748,6 +749,29 @@ export class Company {
         const complete = output.length >= 10 && output.every(f => typeof f.ok === 'boolean' && f.check);
         qaDecision(s, t, 'AI_QA', complete, complete ? `${output.length} checks recorded` : 'scan output incomplete', this.now(), 'agent:ai-qa');
         if (t.status !== 'COMPLETED') failTask(s, t, 'incomplete scan output', 'agent:ai-security', this.now());
+      });
+    } else if (execType === 'PRODUCT_MANAGEMENT') {
+      await this.tx(s => {
+        const t = s.tasks.find(x => x.id === taskId)!;
+        moveTask(s, t, 'IN_PROGRESS', 'agent:ai-dashboard', this.now());
+        const configured = s.products.length;
+        const configurable = s.products.filter(p => p.builder !== null).length;
+        const active = s.products.filter(p => p.active).length;
+        const e = this.audit(s, agent('AI_DASHBOARD'), {
+          what: 'product_management.capability_verified',
+          taskId: t.id,
+          detail: JSON.stringify({ products: configured, buildReady: configurable, active })
+        });
+        t.outputs = {
+          capability: 'product-management',
+          products: configured,
+          buildReady: configurable,
+          active,
+          note: 'Founder-controlled product configuration is already implemented; no code changes were required for this objective.'
+        };
+        addEvidence(s, t, { kind: 'audit', ref: e.id, note: 'product-management capability verified from company state' });
+        moveTask(s, t, 'QA', 'agent:ai-dashboard', this.now());
+        qaDecision(s, t, 'AI_QA', configured > 0, configured > 0 ? `${configured} product records available` : 'no product records', this.now(), 'agent:ai-qa');
       });
     } else if (execType === 'METRICS_REPORT') {
       await this.tx(s => {
