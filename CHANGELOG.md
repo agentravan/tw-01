@@ -20,7 +20,7 @@ Added:
 - The HR dashboard build engine, guide book generator and independent QA.
 - An AI Boss with deterministic routing, and an AI workforce registry with certification computed from recorded test runs.
 - `/console` (Founder) and `/portal` (customers).
-- 49 certification scenarios (`npm run certify`, also run by `npm test`) and a 41-check HTTP end-to-end test (`npm run e2e`).
+- 50 certification scenarios (`npm run certify`, also run by `npm test`) and a 41-check HTTP end-to-end test (`npm run e2e`).
 
 Fixed after independent review (each with a regression scenario that failed first):
 - One Razorpay payment could mark two orders PAID. Payments must now be bound to a gateway order opened for that order, and reuse is rejected on the webhook path too.
@@ -37,6 +37,7 @@ Second review pass:
 - A failed claim on an order in production crashed and lost the claim.
 - Behind a proxy, the client-supplied (left-most) `X-Forwarded-For` entry was trusted. The proxy-appended entry is now used.
 - A second payment on an already-paid order had no follow-up. It is now escalated as a refund review.
+- Payment claims are limited to 10 per customer per hour, and Razorpay 4xx responses are no longer retried (each claim previously made two API calls).
 
 ## 0.1.0 - 2026-09-19
 

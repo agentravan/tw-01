@@ -53,6 +53,8 @@ export class Company {
   /** IPs that have signed in successfully per account (in memory). They bypass the per-account limit, so strangers cannot lock the owner out. */
   private knownIps = new Map<string, Set<string>>();
   readonly registerLimiter = new RateLimiter(5, 60 * 60_000);
+  /** Each claim may call the Razorpay API; cap per customer to protect gateway quota. */
+  readonly claimLimiter = new RateLimiter(10, 60 * 60_000);
   private initialized = false;
 
   constructor(o: CompanyOptions) {
@@ -419,6 +421,7 @@ export class Company {
   async claimPayment(actor: Actor | null, orderId: string, input: any) {
     const a = requirePerm(actor, 'payment.claim.own');
     const paymentId = str(input.paymentId, 'paymentId', { max: 60 });
+    this.claimLimiter.check(a.id);
     return this.tx(async s => {
       const o = this.getOrder(s, a, orderId);
       if (o.paymentVerified) {

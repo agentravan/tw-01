@@ -615,6 +615,16 @@ export const SCENARIOS: Scenario[] = [
       return [t!.id];
     });
   } },
+  { name: 'review #12: payment claims are rate-limited per customer (gateway quota)', employee: 'AI_FINANCE', level: 'SECURITY', async run() {
+    return withH({}, async h => {
+      const c = await h.customer(); const pid = await h.activeProduct();
+      const { order } = await h.co.createOrder(c, orderInput(pid));
+      let limited = false; const before = h.gw.calls.length;
+      for (let i = 0; i < 15; i++) { try { await h.co.claimPayment(c, order.id, { paymentId: `pay_FAKE${String(i).padStart(10, '0')}` }); } catch (e) { if ((e as any).code === 'RATE_LIMITED') { limited = true; break; } } }
+      ok(limited, 'claims limited'); ok(h.gw.calls.length - before <= 10, `gateway calls ${h.gw.calls.length - before}`);
+      return ['limited'];
+    });
+  } },
 ];
 
 export async function runScenarios(filter?: (s: Scenario) => boolean): Promise<TestResult[]> {

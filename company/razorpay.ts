@@ -41,7 +41,12 @@ export class Razorpay {
       });
     } catch (e) { throw new CompanyError('GATEWAY', `Razorpay unreachable: ${(e as Error).message}`); }
     const text = await res.text(); let json: any = null; try { json = JSON.parse(text); } catch { /* keep null */ }
-    if (!res.ok) throw new CompanyError('GATEWAY', `Razorpay ${method} ${path} → HTTP ${res.status}: ${json?.error?.description ?? text.slice(0, 200)}`);
+    if (!res.ok) {
+      const err = new CompanyError('GATEWAY', `Razorpay ${method} ${path} → HTTP ${res.status}: ${json?.error?.description ?? text.slice(0, 200)}`);
+      // 4xx (bad id, auth, validation) cannot succeed on retry; only network errors, timeouts and 5xx are retried.
+      if (res.status < 500) (err as any).noRetry = true;
+      throw err;
+    }
     return json as T;
   }
 
