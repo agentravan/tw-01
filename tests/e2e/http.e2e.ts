@@ -120,6 +120,10 @@ try {
   // Objectives, certification, health
   const obj = await j('POST', '/api/co/admin/objective', { text: 'Run a security scan' }, F);
   check('AI Boss objective completes with evidence', obj.data.status === 'COMPLETED' && obj.data.evidence.length > 0, JSON.stringify(obj.data).slice(0, 300));
+  const salesObj = await j('POST', '/api/co/admin/objective', { text: 'Review sales leads and prepare outreach drafts' }, F);
+  check('AI Sales objective completes with tool evidence and independent QA', salesObj.data.agent === 'AI_SALES' && salesObj.data.status === 'COMPLETED' && salesObj.data.qaBy === 'agent:ai-qa' && salesObj.data.evidence.some((e: any) => e.kind === 'tool_execution') && salesObj.data.outputs.report.messagesSent === 0, JSON.stringify(salesObj.data).slice(0, 500));
+  const sendObj = await j('POST', '/api/co/admin/objective', { text: 'Send outreach to the sales leads' }, F);
+  check('AI Sales send request escalates without claiming or sending outreach', sendObj.data.status === 'ESCALATED' && /outbound execution is not enabled/i.test(sendObj.data.errors.join(' ')) && !sendObj.data.evidence.length, JSON.stringify(sendObj.data).slice(0, 500));
   const h = await j('GET', '/api/co/health', undefined, F);
   check('health OK, audit chain intact, tools active', h.data.status === 'OK' && h.data.auditChain.ok && h.data.tools.every((t: any) => t.status === 'ACTIVE'), JSON.stringify(h.data).slice(0, 300));
   const anonHealth = await j('GET', '/api/co/health');

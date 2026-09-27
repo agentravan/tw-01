@@ -11,6 +11,8 @@ import { Razorpay } from '../razorpay.js';
 import { emptyCompany } from '../types.js';
 import { harness, orderInput, type Harness } from './harness.js';
 import { SMALL_CSV, SMALL_EXPECTED, generatedCsv } from './fixtures.js';
+import { reviewSalesPipeline, verifySalesReview } from '../sales-agent.js';
+import type { Lead } from '../../src/types.js';
 
 export interface Scenario { name: string; employee: Role; level: CertLevel; run(): Promise<string[]> }
 class Fail extends Error {}
@@ -635,6 +637,89 @@ export const SCENARIOS: Scenario[] = [
       await rejects(h.co.login('founder@test.local', 'founder-test-password-1', 'test'), 'UNAUTHENTICATED', 'old password');
       ok(!!(await h.co.login('founder@test.local', 'new-founder-password-9', 'test')).token, 'new password works');
       return ['changed'];
+    });
+  } },
+  // ------------------------------------------------------------------ AI SALES OFFICER
+  { name: 'sales review deterministically counts and qualifies persisted CRM leads', employee: 'AI_SALES', level: 'UNIT', async run() {
+    const leads: Lead[] = [
+      { id: 'lead_hot', company_name: 'Northwind Ltd', industry: 'Manufacturing', location: 'Gurugram', email: 'hr@northwind.test', contact_name: 'Asha', source: 'test', lead_score: 85, status: 'NEW', created_at: '2026-01-01T00:00:00.000Z', next_followup: '2026-01-01T00:00:00.000Z' },
+      { id: 'lead_optout', company_name: 'Contoso Ltd', industry: 'Services', location: 'Delhi', email: 'contact@contoso.test', source: 'test', lead_score: 90, status: 'HOT', opt_out: true, created_at: '2026-01-01T00:00:00.000Z' },
+      { id: 'lead_lost', company_name: 'Fabrikam Ltd', industry: 'Retail', location: 'Noida', email: 'contact@fabrikam.test', source: 'test', lead_score: 95, status: 'LOST', created_at: '2026-01-01T00:00:00.000Z' },
+    ];
+    const report = reviewSalesPipeline(leads, '2026-02-01T00:00:00.000Z');
+    ok(report.leadCount === 3 && report.statusCounts.NEW === 1 && report.statusCounts.HOT === 1 && report.statusCounts.LOST === 1, 'counts reflect source records');
+    ok(report.qualificationRecommendations.some(x => x.leadId === 'lead_hot' && x.recommended === 'HOT'), 'score-based recommendation');
+    ok(report.followUpsDue.join() === 'lead_hot', `due follow-ups: ${report.followUpsDue}`);
+    ok(report.outreachDrafts.length === 1 && report.outreachDrafts[0].leadId === 'lead_hot', 'opt-out and terminal leads excluded');
+    ok(report.messagesSent === 0 && verifySalesReview(leads, report).length === 0, 'draft-only report independently verifies');
+    return ['3 source records', 'counts + qualification + follow-up + draft eligibility'];
+  } },
+  { name: 'sales review tool is self-tested and least-privilege registered', employee: 'AI_SALES', level: 'INTEGRATION', async run() {
+    return withH({}, async h => {
+      const s = await state(h); const tool = s.tools.find(x => x.name === 'sales.review');
+      ok(tool?.status === 'ACTIVE' && tool.lastTest?.passed, `tool status ${tool?.status}: ${tool?.lastTest?.detail}`);
+      ok(JSON.stringify(tool?.permissions) === '["AI_SALES"]', `permissions ${tool?.permissions}`);
+      await rejects(h.co.tx(st => h.co.tools.execute(st, 'AI_DASHBOARD', 'sales.review', { leads: [], asOf: '2026-01-01T00:00:00.000Z' }, { at: () => 'test' })), 'FORBIDDEN', 'dashboard specialist cannot use sales tool');
+      return ['sales.review active', 'AI_SALES-only permission'];
+    });
+  } },
+  { name: 'Founder sales objective completes with tool evidence and independent QA', employee: 'AI_SALES', level: 'FUNCTIONAL', async run() {
+    return withH({}, async h => {
+      const at = '2026-01-01T00:00:00.000Z';
+      const lead: Lead = { id: 'sales_functional', company_name: 'Example Industries', industry: 'Manufacturing', location: 'Gurugram', email: 'hr@example.test', contact_name: 'Neha', source: 'test', lead_score: 85, status: 'NEW', created_at: at };
+      await h.co.store.update(s => { s.leads.push(lead); });
+      const t = await h.co.submitObjective(h.founder, 'Review the sales leads and prepare outreach drafts');
+      ok(t.agent === 'AI_SALES' && t.status === 'COMPLETED', `sales task ${t.agent}/${t.status}: ${t.errors.join('; ')}`);
+      ok(t.evidence.some(e => e.kind === 'tool_execution') && t.evidence.some(e => e.kind === 'audit') && t.qaBy === 'agent:ai-qa', 'tool + QA audit evidence and independent reviewer');
+      const toolId = t.evidence.find(e => e.kind === 'tool_execution')!.ref;
+      const s = await state(h); const execution = s.toolExecutions.find(x => x.id === toolId)!;
+      ok(execution?.status === 'OK' && execution.agent === 'AI_SALES', 'evidence resolves to successful Sales execution');
+      ok(!execution.inputSummary.includes(lead.email!) && !execution.outputSummary.includes(lead.email!), 'personal contact data omitted from execution logs');
+      const report = t.outputs.report as ReturnType<typeof reviewSalesPipeline>;
+      ok(report.outreachDrafts.length === 1 && report.messagesSent === 0, 'draft created, no message sent');
+      return [t.id, toolId, t.evidence.find(e => e.kind === 'audit')!.ref];
+    });
+  } },
+  { name: 'paused or failing sales reviews are bounded and escalated without contact', employee: 'AI_SALES', level: 'FAILURE', async run() {
+    return withH({}, async h => {
+      const outbound = await h.co.submitObjective(h.founder, 'Send outreach to the sales leads');
+      ok(outbound.status === 'ESCALATED' && /outbound execution is not enabled/i.test(outbound.errors.join(' ')), `outbound task ${outbound.status}: ${outbound.errors}`);
+      await h.co.tx(s => { s.pausedAgents.push('AI_SALES'); });
+      const t = await h.co.submitObjective(h.founder, 'Review sales pipeline');
+      ok(t.status === 'ESCALATED' && t.retryCount === 0, `paused work status/retries: ${t.status}/${t.retryCount}`);
+      ok(t.evidence.length === 0 && t.errors.some(x => /paused/i.test(x)), 'failed run has no success evidence and records blocker');
+      const after = await h.co.store.load();
+      ok(after.activities.length === 0 && after.approvals.length === 0, 'no outbound contact or approval was created');
+      return [outbound.id, t.id, 'bounded escalation', 'no side effects'];
+    });
+  } },
+  { name: 'sales review excludes opted-out leads and rejects invented report values', employee: 'AI_SALES', level: 'SECURITY', async run() {
+    const at = '2026-01-01T00:00:00.000Z';
+    const leads: Lead[] = [
+      { id: 'safe', company_name: 'Safe Co', industry: 'Services', location: 'Delhi', email: 'ok@example.test', source: 'test', lead_score: 80, status: 'HOT', created_at: at },
+      { id: 'opted', company_name: 'Opt Out Co', industry: 'Services', location: 'Delhi', email: 'no@example.test', source: 'test', lead_score: 100, status: 'HOT', opt_out: true, created_at: at },
+    ];
+    const report = reviewSalesPipeline(leads, at);
+    ok(report.outreachDrafts.length === 1 && report.outreachDrafts[0].leadId === 'safe', 'opt-out omitted from contact suggestions');
+    const tampered = structuredClone(report); tampered.statusCounts.HOT++;
+    ok(verifySalesReview(leads, tampered).includes('pipeline counts mismatch'), 'independent QA detects falsified count');
+    const missingOptOut = structuredClone(report); missingOptOut.outreachDrafts.push({ leadId: 'opted', to: 'no@example.test', subject: 'x', body: 'x' });
+    ok(verifySalesReview(leads, missingOptOut).includes('draft eligibility mismatch'), 'independent QA detects opted-out draft');
+    return ['opt-out safety', 'tampered metrics rejected'];
+  } },
+  { name: 'sales review is read-only and repeatable against unchanged CRM records', employee: 'AI_SALES', level: 'REGRESSION', async run() {
+    return withH({}, async h => {
+      const at = new Date().toISOString();
+      const lead: Lead = { id: 'sales_regression', company_name: 'Stable Co', industry: 'Logistics', location: 'Noida', email: 'hr@stable.test', source: 'test', lead_score: 60, status: 'QUALIFIED', created_at: at };
+      await h.co.store.update(s => { s.leads.push(lead); });
+      const before = JSON.stringify((await h.co.store.load()).leads);
+      const one = await h.co.submitObjective(h.founder, 'Review sales pipeline');
+      const two = await h.co.submitObjective(h.founder, 'Review sales pipeline');
+      const after = JSON.stringify((await h.co.store.load()).leads);
+      ok(one.status === 'COMPLETED' && two.status === 'COMPLETED', 'repeated review objectives pass');
+      ok(before === after, 'CRM source records were not modified');
+      ok((one.outputs.report as any).messagesSent === 0 && (two.outputs.report as any).messagesSent === 0, 'no outbound side effect');
+      return [one.id, two.id, 'source unchanged'];
     });
   } },
 ];

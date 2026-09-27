@@ -19,6 +19,7 @@ import { dataAsOf, type KpiSet } from './hr-kpi.js';
 import { renderHrDashboard } from './dashboard-build.js';
 import { renderGuide } from './guide.js';
 import { runDashboardQA } from './qa.js';
+import { reviewSalesPipeline, verifySalesReview } from './sales-agent.js';
 
 export interface CompanyOptions { blobs?: BlobStore; store?: JsonStore; razorpay?: Razorpay; mailer: Mailer; clock?: Clock; dataDir?: string; supportEmail?: string; allowedOrigin?: string; env?: NodeJS.ProcessEnv; }
 const agent = (role: Role): Actor => ({ kind: 'agent', id: role.toLowerCase().replace(/_/g, '-'), role });
@@ -119,6 +120,9 @@ export class Company {
       { def: { name: 'security.scan', purpose: 'Security checks over state and configuration', permissions: ['AI_SECURITY'], input: 'state', output: 'findings', risk: 'GREEN', approval: 'NONE', timeoutMs: 20_000, retry: 0, version: '1.0.0' },
         run: (st: CompanyState) => this.securityFindings(st),
         selfTest: () => { const st = emptyCompany(); const clean = this.securityFindings(st).find(f => f.check === 'audit_chain_intact'); appendAudit(st, null, 't', { what: 'x' }); appendAudit(st, null, 't', { what: 'y' }); st.audit[0].detail = 'tampered'; const dirty = this.securityFindings(st).find(f => f.check === 'audit_chain_intact'); return clean?.ok && dirty && !dirty.ok ? null : 'tamper not detected'; } },
+      { def: { name: 'sales.review', purpose: 'Review persisted CRM pipeline and prepare safe draft-only recommendations', permissions: ['AI_SALES'], input: 'CRM leads + review timestamp', output: 'pipeline counts, recommendations and drafts', risk: 'GREEN', approval: 'NONE', timeoutMs: 10_000, retry: 0, version: '1.0.0' },
+        run: ({ leads, asOf }: { leads: import('../src/types.js').Lead[]; asOf?: string }) => reviewSalesPipeline(leads, asOf ?? this.now()),
+        selfTest: () => { const at = '2026-01-02T00:00:00.000Z'; const lead = { id: 'selftest-lead', company_name: 'Example Ltd', industry: 'Manufacturing', location: 'Gurugram', email: 'contact@example.test', source: 'self-test', lead_score: 80, status: 'HOT' as const, next_followup: '2026-01-01T00:00:00.000Z', created_at: at }; const r = reviewSalesPipeline([lead], at); return verifySalesReview([lead], r, at).length === 0 && r.outreachDrafts.length === 1 && r.followUpsDue.length === 1 && r.messagesSent === 0 ? null : 'sales review self-test did not match source records'; } },
     ];
     for (const d of defs) await this.tools.register(s, d, at);
   }
@@ -696,7 +700,7 @@ export class Company {
     { re: /\bORD-\d+\b/, role: 'AI_DASHBOARD', type: 'ORDER_PIPELINE' },
     { re: /\b(product management|manage products|seller dashboard|add .*product|edit .*product|activate.*product|deactivate.*product)\b/i, role: 'AI_DASHBOARD', type: 'PRODUCT_MANAGEMENT' },
     { re: /\b(report|kpi|metrics?|revenue|summary)\b/i, role: 'AI_DATA', type: 'METRICS_REPORT' },
-    { re: /\b(lead|prospect|outreach|sales)\b/i, role: 'AI_SALES', type: 'SALES' },
+    { re: /\b(lead|prospect|outreach|sales)\b/i, role: 'AI_SALES', type: 'SALES_REVIEW' },
     { re: /\b(seo|linkedin|content|campaign|marketing)\b/i, role: 'AI_MARKETING', type: 'MARKETING' },
     { re: /\b(payroll|pf|esic|lwf|tds|compliance|recruit)/i, role: 'AI_HR', type: 'HR_SERVICE' },
     { re: /\b(dropship|supplier|shipping|cod)\b/i, role: 'AI_ORDER', type: 'DROPSHIP' },
@@ -720,13 +724,20 @@ export class Company {
         return { taskId: t.id, execType: null, orderRef: null };
       }
       const def = EMPLOYEES.find(e => e.role === route.role)!;
-      const t = createTask(s, { title: clip(objective, 120), description: objective, type: route.type, agent: route.role, priority: 'MEDIUM', createdBy: boss, at: this.now(), inputs: { objective } });
+      const t = createTask(s, { title: clip(objective, 120), description: objective, type: route.type, agent: route.role, priority: 'MEDIUM', createdBy: boss, at: this.now(), maxRetries: route.type === 'SALES_REVIEW' ? 0 : undefined, inputs: { objective } });
       if (!def.implemented) {
         moveTask(s, t, 'WAITING', boss, this.now(), `${def.name} is not built yet`);
         const op = createTask(s, { title: `Build capability for ${def.name}: ${clip(objective, 80)}`, type: 'CAPABILITY_BUILD', agent: 'AI_OPERATOR', priority: 'MEDIUM', createdBy: boss, at: this.now(), inputs: { forTask: t.id } });
         moveTask(s, op, 'WAITING', boss, this.now(), 'AI Operator has no build executor yet');
         moveTask(s, op, 'ESCALATED', boss, this.now(), 'Needs a human/engineering session to build this capability');
         moveTask(s, t, 'ESCALATED', boss, this.now(), `blocked on ${op.id}`);
+        return { taskId: t.id, execType: null, orderRef: null };
+      }
+      if (route.type === 'SALES_REVIEW' && /\b(send|contact|call|message)\b|\bemail\s+(?:the\s+)?(?:leads|customers|prospects)\b|\bwhatsapp\s+(?:the\s+)?(?:leads|customers|prospects)\b/i.test(objective)) {
+        const blocker = 'This Sales capability only reviews CRM data and drafts messages; outbound execution is not enabled.';
+        t.errors.push(blocker);
+        moveTask(s, t, 'WAITING', boss, this.now(), blocker);
+        moveTask(s, t, 'ESCALATED', boss, this.now(), 'Founder decision needed; no message was sent or approval fabricated');
         return { taskId: t.id, execType: null, orderRef: null };
       }
       return { taskId: t.id, execType: route.type, orderRef: /\bORD-\d+\b/.exec(objective)?.[0] ?? null };
@@ -786,6 +797,38 @@ export class Company {
     } else if (execType === 'CERTIFICATION_RUN' && runCertification) {
       const r = await runCertification();
       await this.tx(s => { const t = s.tasks.find(x => x.id === taskId)!; moveTask(s, t, 'IN_PROGRESS', 'agent:ai-qa', this.now()); addEvidence(s, t, { kind: 'test_run', ref: r.runId, note: `${r.passed} passed, ${r.failed} failed` }); moveTask(s, t, 'QA', 'agent:ai-qa', this.now()); qaDecision(s, t, 'AI_BOSS', r.failed === 0, `${r.failed} failures`, this.now(), 'agent:ai-boss'); if (t.status !== 'COMPLETED') failTask(s, t, `${r.failed} scenario(s) failed`, 'agent:ai-qa', this.now()); });
+    } else if (execType === 'SALES_REVIEW') {
+      await this.store.transact(async state => {
+        const s = state.company; const t = s.tasks.find(x => x.id === taskId)!; const at = () => this.now();
+        try {
+          moveTask(s, t, 'IN_PROGRESS', 'agent:ai-sales', at());
+          const { execution, output } = await this.tools.execute<ReturnType<typeof reviewSalesPipeline>>(s, 'AI_SALES', 'sales.review', { leads: state.leads, asOf: at() }, {
+            taskId: t.id, at, inputSummary: `${state.leads.length} persisted CRM lead records; contact details omitted`,
+            outputSummary: value => { const r = value as ReturnType<typeof reviewSalesPipeline>; return `${r.leadCount} leads; ${r.qualificationRecommendations.length} qualification recommendations; ${r.followUpsDue.length} follow-ups; ${r.outreachDrafts.length} drafts; sent=${r.messagesSent}`; },
+          });
+          t.outputs = { report: output };
+          addEvidence(s, t, { kind: 'tool_execution', ref: execution.id, note: 'read-only CRM review; no messages sent' });
+          moveTask(s, t, 'QA', 'agent:ai-sales', at());
+          const errors = verifySalesReview(state.leads, output, output.asOf);
+          const audit = this.audit(s, agent('AI_QA'), { what: 'sales.review.qa', taskId: t.id, tool: 'sales.review', result: errors.length ? 'FAILED' : 'OK', detail: errors.length ? errors.join('; ') : `${output.leadCount} leads independently checked; no messages sent` });
+          addEvidence(s, t, { kind: 'audit', ref: audit.id, note: 'AI_QA independently recomputed sales review' });
+          qaDecision(s, t, 'AI_QA', errors.length === 0, errors.length ? errors.join('; ') : 'CRM counts, eligibility, opt-out exclusions and draft-only policy verified', at(), 'agent:ai-qa');
+          if (t.status !== 'COMPLETED') failTask(s, t, `sales QA failed: ${errors.join('; ')}`, 'agent:ai-sales', at());
+        } catch (error) {
+          const message = clip((error as Error).message || String(error), 300);
+          if (t.status === 'ASSIGNED') {
+            moveTask(s, t, 'WAITING', 'agent:ai-boss', at(), message);
+            t.errors.push(message);
+            moveTask(s, t, 'ESCALATED', 'agent:ai-boss', at(), 'sales review did not run; Founder review required');
+          }
+          if (t.status === 'IN_PROGRESS' || t.status === 'QA') {
+            if (t.status === 'QA') moveTask(s, t, 'IN_PROGRESS', 'agent:ai-boss', at(), 'sales review failed before QA completion');
+            t.maxRetries = 0;
+            failTask(s, t, message, 'agent:ai-sales', at());
+          }
+          this.audit(s, agent('AI_SALES'), { what: 'sales.review.failed', taskId: t.id, tool: 'sales.review', result: 'FAILED', detail: message });
+        }
+      });
     }
     return this.read(s => s.tasks.find(x => x.id === taskId)!);
   }

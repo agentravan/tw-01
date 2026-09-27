@@ -39,13 +39,14 @@ Architecture: one deterministic orchestrator (the AI Boss) with role definitions
 | AI Finance Officer | yes | Verify payments with Razorpay; refunds after approval | `razorpay.fetch_payment`, `razorpay.refund` | valid HMAC only; amount/order/currency match; duplicates and reuse rejected | unverifiable → stays unpaid / PAYMENT_REVIEW |
 | AI Security Officer | yes | Audit chain, credentials, least privilege, secrets at rest, webhook trust, CORS | `security.scan` | detects tampering, missing webhook secret, secrets in data | critical findings reported to Founder |
 | AI Data Analyst | yes | Metrics from records only | metrics | revenue = verified payments − refunds; profit not shown without expense data | missing data shown as missing |
-| AI Support, Operator, Researcher, Sales, Marketing, HR, Order (dropshipping), Supplier, Documentation | **no** | Defined in `company/agents.ts` | — | — | Objectives routed to them are **escalated** to the Founder with an Operator build task, never faked |
+| AI Sales Officer | yes (scoped) | Review persisted CRM leads, recommend qualification, identify due follow-ups and prepare up to five factual email drafts | `sales.review` | counts, recommendations, opt-out handling and draft eligibility independently recomputed | failed/paused work is escalated; no message is sent |
+| AI Support, Operator, Researcher, Marketing, HR, Order (dropshipping), Supplier, Documentation | **no** | Defined in `company/agents.ts` | — | — | Objectives routed to them are **escalated** to the Founder with an Operator build task, never faked |
 
-The existing TW-01 sales engine (lead scoring, drafts, follow-ups) still runs as before. It has not yet been brought under this certification harness.
+The certified AI Sales task is intentionally read-only and draft-only. It reviews persisted CRM records and never mutates stages, discovers prospects, creates approvals, or sends messages. The existing broader TW-01 sales engine (discovery, lead scoring, approvals and outbound adapters) remains separate and is not certified under the Company OS harness; outbound capability must not be considered production-ready on the strength of the scoped review tests.
 
 ## Certification
 
-Each built employee has scenarios at six levels: UNIT, INTEGRATION, FUNCTIONAL, FAILURE, SECURITY and REGRESSION (`company/testing/scenarios.ts`). They run in isolated sandboxes:
+Each implemented employee has scenarios at six levels: UNIT, INTEGRATION, FUNCTIONAL, FAILURE, SECURITY and REGRESSION (`company/testing/scenarios.ts`). They run in isolated sandboxes:
 
 - `npm run certify` prints the results table.
 - `npm test` runs the same scenarios in CI.
@@ -55,7 +56,7 @@ The **PRODUCTION** level comes only from `POST /api/co/admin/verify-production` 
 
 Payment scenarios use `company/testing/gateway-double.ts`, a test double of the three Razorpay endpoints TW-01 calls. It signs exactly as Razorpay documents, so the real verification code runs unchanged. It is never wired into the server, and it cannot produce PRODUCTION results.
 
-`npm run e2e` starts the real server as a separate process and drives 41 checks over HTTP.
+`npm run e2e` starts the real server as a separate process and drives 43 checks over HTTP.
 
 Two independent review passes on 2026-09-27 found 11 defects: 7, then 4 more, two of which the first fixes introduced. Each now has a `review #n` scenario that failed before its fix. Mutation testing (11 deliberately injected bugs) confirms the scenarios catch regressions.
 
@@ -77,4 +78,4 @@ Two independent review passes on 2026-09-27 found 11 defects: 7, then 4 more, tw
 - **Uploads and deliverables**: `data/` locally; the private `tw01_blobs` table on Supabase.
 - **Rate limiting** is in-memory, so it applies per process. Limits apply per IP, and per account for devices that have not signed in before, so a stranger cannot lock the Founder out of a known device. The known-device list is in memory, so after a restart the Founder may briefly be limited like anyone else. **Locked out?** All limits are in memory, so restarting the server clears them. Behind a reverse proxy or CDN, set `TW01_TRUST_PROXY=true` and make sure exactly one trusted hop appends `X-Forwarded-For`. Otherwise every request appears to come from the proxy's IP, and failed logins from strangers count against you. Payment claims are limited to 10 per customer per hour. `X-Forwarded-For` is trusted only with `TW01_TRUST_PROXY=true`.
 - **Build engines** exist only for the employee-master family: HR Master, Headcount, Attrition, Diversity and CHRO. Payroll, Attendance, Recruitment, Compliance, F&F and Custom need their own data schemas and builders.
-- **Dropshipping, HR services and the remaining nine employees** are not implemented.
+- **Dropshipping, HR services, outbound AI Sales automation and the remaining eight employees** are not implemented or certified as complete workflows.
