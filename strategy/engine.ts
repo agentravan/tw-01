@@ -77,9 +77,11 @@ export function evaluateBusiness(
     return decision(business, 'TEST', 'Insufficient validation period to make a shutdown decision.', 'Continue a bounded experiment without increasing the approved loss limit.');
   }
 
-  const nextLossPeriods = business.consecutive_loss_periods + 1;
+  // recordMetric() already counts the latest loss period, so do not add it again.
+  // Math.max guards callers that attach a losing metric without updating the counter.
+  const lossPeriods = Math.max(business.consecutive_loss_periods, 1);
 
-  if (nextLossPeriods >= p.max_loss_periods || Math.abs(profit) >= business.max_loss) {
+  if (lossPeriods >= p.max_loss_periods || Math.abs(profit) >= business.max_loss) {
     return decision(business, 'SHUTDOWN', `Loss remains unacceptable after strategy iteration or exceeded the maximum loss limit.`, 'Stop new spending, preserve the experiment data, record the shutdown reason, and redirect resources to other opportunities.');
   }
 
