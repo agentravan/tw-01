@@ -10,7 +10,10 @@
     "test": "vitest run",
     "lint": "tsc --noEmit",
     "start": "tsx api/server.ts",
-    "check": "npm run build && npm test"
+    "check": "npm run build && npm test",
+    "certify": "tsx scripts/certify.ts",
+    "verify:production": "tsx scripts/verify-production.ts",
+    "e2e": "tsx tests/e2e/http.e2e.ts"
   },
   "engines": {
     "node": ">=20"

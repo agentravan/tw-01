@@ -6,6 +6,23 @@
 
 Free-first, open-source business-development automation foundation for Team Work Solutions.
 
+## Company OS (dashboard business)
+
+TW-01 now also runs the dashboard business end to end: a customer orders on `/portal`, pays online through Razorpay, and the payment is verified server-side with the gateway. The AI Dashboard Specialist then builds the dashboard and guide book from the customer's employee file, the AI QA Officer checks it independently, and it is delivered. You run it from `/console`, with approvals, the AI workforce and its certification, orders, the audit log and system health.
+
+- Production cannot start without a gateway-verified payment or your recorded override.
+- Tasks complete only with real evidence and a QA pass by another employee.
+- Six AI employees are built and tested. The other nine are listed as not built, and objectives sent to them are escalated to you.
+
+See [docs/COMPANY-OS.md](docs/COMPANY-OS.md) for the rules, configuration and known limits.
+
+```bash
+npm test                  # unit, regression and all AI-employee certification scenarios
+npm run certify           # certification table per employee and level
+npm run e2e               # starts the server and drives the full workflow over HTTP (41 checks)
+```
+
+
 TW-01 helps Harshit research prospects, qualify leads, prepare compliant outreach, manage follow-ups, prepare meetings, and track revenue. External providers are optional; missing credentials are never simulated.
 
 ## Quick start
@@ -27,7 +44,7 @@ Open `http://localhost:3000`. The included PWA is responsive for Android and des
 
 ## Commands
 
-`npm run dev` · `npm run build` · `npm test` · `npm run lint`
+`npm run dev` · `npm run build` · `npm test` · `npm run lint` · `npm run certify` · `npm run e2e`
 
 ## Structure
 
@@ -41,6 +58,10 @@ Open `http://localhost:3000`. The included PWA is responsive for Android and des
 - `api/` HTTP API
 - `tests/` unit, integration and regression tests
 - `docs/` deployment and operating guidance
+
+## Security
+
+The API needs a Founder session (sign in at `/console`) or `TW01_AUTH_TOKEN`. It no longer runs open when the token is empty. The server serves only the `dashboard/`, `console/` and `portal/` folders, so `.env`, `data/` and the source code are never served.
 
 ## Safety
 

@@ -21,18 +21,19 @@ export class BusinessOS {
     revenue: number; direct_cost: number; operating_cost: number;
     acquisition_cost: number; conversions: number; customers: number; period_days: number;
   }) {
-    return this.store.update(s => {
+    return this.store.transact(s => {
       const b = s.businesses.find(x => x.id === businessId);
       if (!b) throw new Error('business not found');
       if (b.status === 'SHUTDOWN') throw new Error('business is shut down; create a new bounded experiment to retry');
       if ([metric.revenue,metric.direct_cost,metric.operating_cost,metric.acquisition_cost,metric.conversions,metric.customers,metric.period_days].some(x => !Number.isFinite(x) || x < 0) || metric.period_days <= 0) throw new Error('invalid metric values');
       const updated = recordMetric(b, metric);
       Object.assign(b, updated);
+      return structuredClone(b);
     });
   }
 
   async review(policy: Parameters<typeof runPortfolioReview>[1] = {}) {
-    return this.store.update(s => {
+    return this.store.transact(s => {
       const result = runPortfolioReview({ businesses: s.businesses, decisions: s.strategyDecisions }, policy);
       s.businesses = result.portfolio.businesses;
       s.strategyDecisions.push(...result.decisions);

@@ -1,6 +1,8 @@
 const $=s=>document.querySelector(s); const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const params=new URLSearchParams(location.search); const API=params.get('api')||'';
-async function api(path,options={}){const r=await fetch(API+path,options);const d=await r.json();if(!r.ok)throw Error(d.error||'Request failed');return d;}
+// The API now requires a Founder session (sign in at /console) or the service token.
+const TOKEN=(()=>{try{return localStorage.getItem('tw01_session')||''}catch{return''}})();
+async function api(path,options={}){const headers={...(options.headers||{})};if(TOKEN)headers.authorization='Bearer '+TOKEN;const r=await fetch(API+path,{...options,headers});const d=await r.json().catch(()=>({}));if(r.status===401)throw Error('Sign in as Founder at /console to use the Control Room.');if(!r.ok)throw Error(d.error||'Request failed');return d;}
 let snapshot=null,selected=null;
 const statusClass=s=>String(s||'').toLowerCase().replaceAll('_','-');
 function employeeCard(e){
@@ -25,7 +27,7 @@ function renderDetail(id){
 }
 async function refreshControl(){
  try{snapshot=await api('/api/control-room');render();await refreshBusiness();await refreshSafety();}
- catch(e){$('#connection').innerHTML='<span class="offline">● Runtime not connected</span>';$('#employees').innerHTML='<div class="empty">The Control Room UI is online, but the AI runtime API is not connected. Run TW-01 locally or connect the API deployment using ?api=https://…</div>';}
+ catch(e){const auth=/Sign in/.test(e.message);$('#connection').innerHTML='<span class="offline">● '+(auth?'Sign-in required':'Runtime not connected')+'</span>';$('#employees').innerHTML='<div class="empty">'+(auth?'This Control Room needs a Founder sign-in. <a href="/console">Sign in at /console</a>, then reload.':'The Control Room UI is online, but the AI runtime API is not connected. Run TW-01 locally or connect the API deployment using ?api=https://…')+'</div>';}
 }
 async function refreshBusiness(){try{const p=await api('/api/businesses');$('#businesses').innerHTML=p.businesses.length?p.businesses.map(x=>`<article class="taskRow"><strong>${esc(x.name)}</strong><span class="status ${statusClass(x.status)}">${esc(x.status)}</span><p>${esc(x.hypothesis)}</p><small>Budget ₹${esc(x.max_test_budget)} · Loss periods ${esc(x.consecutive_loss_periods)} · Strategy v${esc(x.strategy_version)}</small></article>`).join(''):'No businesses tracked.'}catch{}}
 async function refreshSafety(){try{const s=await api('/api/status');const approvals=snapshot?.approvals||[];$('#safety').innerHTML=`Paused: <b>${s.paused?'YES':'NO'}</b> · Emergency Stop: <b>${s.emergencyStop?'ACTIVE':'OFF'}</b> · Pending Approvals: <b>${approvals.length}</b>`}catch{}}
