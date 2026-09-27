@@ -43,6 +43,7 @@ export const PERMISSIONS: Record<string, Role[]> = {
   'task.qa': ['AI_QA'],
   'task.escalate': ['AI_BOSS'],
   'task.cancel': ['FOUNDER', 'AI_BOSS'],
+  'sales.review': ['AI_SALES'],
 
   // Tools, email, reports, security
   'tool.register': ['AI_OPERATOR', 'FOUNDER'],

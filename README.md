@@ -12,7 +12,7 @@ TW-01 now also runs the dashboard business end to end: a customer orders on `/po
 
 - Production cannot start without a gateway-verified payment or your recorded override.
 - Tasks complete only with real evidence and a QA pass by another employee.
-- Six AI employees are built and tested. The other nine are listed as not built, and objectives sent to them are escalated to you.
+- Seven AI employees are implemented and have unit, integration, functional, failure, security and regression scenarios. AI Sales is deliberately read-only/draft-only: outbound communication is never sent by its review task. The other eight are listed as not built, and objectives sent to them are escalated to you.
 
 See [docs/COMPANY-OS.md](docs/COMPANY-OS.md) for the rules, configuration and known limits.
 

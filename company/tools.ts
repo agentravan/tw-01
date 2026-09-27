@@ -26,11 +26,11 @@ export class ToolRuntime {
     return def;
   }
 
-  async execute<O = any>(s: CompanyState, agent: Role, name: string, input: unknown, ctx: { taskId?: string | null; at: () => string }): Promise<{ execution: ToolExecution; output: O }> {
+  async execute<O = any>(s: CompanyState, agent: Role, name: string, input: unknown, ctx: { taskId?: string | null; at: () => string; inputSummary?: string; outputSummary?: (output: unknown) => string }): Promise<{ execution: ToolExecution; output: O }> {
     const def = s.tools.find(t => t.name === name);
     const impl = this.impls.get(name);
     const rec = (status: ToolExecution['status'], attempts: number, ms: number, out: unknown, error: string | null): ToolExecution => {
-      const e: ToolExecution = { id: uid('tex'), tool: name, version: def?.version ?? '?', agent, taskId: ctx.taskId ?? null, at: ctx.at(), durationMs: ms, attempts, status, inputSummary: summarize(input, 200), outputSummary: summarize(out, 300), error };
+      const e: ToolExecution = { id: uid('tex'), tool: name, version: def?.version ?? '?', agent, taskId: ctx.taskId ?? null, at: ctx.at(), durationMs: ms, attempts, status, inputSummary: ctx.inputSummary?.slice(0, 200) ?? summarize(input, 200), outputSummary: ctx.outputSummary ? ctx.outputSummary(out).slice(0, 300) : summarize(out, 300), error };
       s.toolExecutions.push(e);
       if (s.toolExecutions.length > 5000) s.toolExecutions.splice(0, s.toolExecutions.length - 5000);
       return e;
