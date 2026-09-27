@@ -14,7 +14,8 @@
     "certify": "tsx scripts/certify.ts",
     "verify:production": "tsx scripts/verify-production.ts",
     "e2e": "tsx tests/e2e/http.e2e.ts",
-    "build:vercel": "node scripts/build-vercel.mjs"
+    "build:vercel": "node scripts/build-vercel.mjs",
+    "smoke:production": "tsx scripts/smoke-production.ts"
   },
   "engines": {
     "node": ">=20"
