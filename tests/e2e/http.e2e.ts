@@ -120,6 +120,15 @@ try {
   // Objectives, certification, health
   const obj = await j('POST', '/api/co/admin/objective', { text: 'Run a security scan' }, F);
   check('AI Boss objective completes with evidence', obj.data.status === 'COMPLETED' && obj.data.evidence.length > 0, JSON.stringify(obj.data).slice(0, 300));
+  const assigned = await j('POST', '/api/control-room/task', { goal: 'E2E status regression task', assignedBy: 'founder', assignedTo: 'ai-boss' }, F);
+  let control = await j('GET', '/api/control-room', undefined, F);
+  check('AI Boss stays Waiting for an assigned task with no active run', control.data.employees.find((e: any) => e.id === 'ai-boss')?.status === 'WAITING' && control.data.tasks.find((t: any) => t.id === assigned.data.id)?.status === 'ASSIGNED', JSON.stringify(control.data.employees.find((e: any) => e.id === 'ai-boss')));
+  const started = await j('POST', '/api/control-room/run', { employeeId: 'ai-boss', taskId: assigned.data.id, trigger: 'e2e' }, F);
+  control = await j('GET', '/api/control-room', undefined, F);
+  check('AI Boss shows Working only while a live run exists', started.data.status === 'RUNNING' && control.data.employees.find((e: any) => e.id === 'ai-boss')?.status === 'WORKING', JSON.stringify(started.data));
+  await j('POST', '/api/control-room/finish', { runId: started.data.id, result: { e2e: true } }, F);
+  control = await j('GET', '/api/control-room', undefined, F);
+  check('AI Boss leaves Working after the run completes', control.data.employees.find((e: any) => e.id === 'ai-boss')?.status === 'COMPLETED' && control.data.employees.find((e: any) => e.id === 'ai-boss')?.currentTaskId === null, JSON.stringify(control.data.employees.find((e: any) => e.id === 'ai-boss')));
   const h = await j('GET', '/api/co/health', undefined, F);
   check('health OK, audit chain intact, tools active', h.data.status === 'OK' && h.data.auditChain.ok && h.data.tools.every((t: any) => t.status === 'ACTIVE'), JSON.stringify(h.data).slice(0, 300));
   const anonHealth = await j('GET', '/api/co/health');
