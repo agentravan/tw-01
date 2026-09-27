@@ -4,8 +4,10 @@ import { CompanyError } from '../company/util.js';
 import { runScenarios } from '../company/testing/scenarios.js';
 import { verifyProduction } from '../company/testing/production.js';
 import type { Actor } from '../company/types.js';
+import { JarvisEngine } from '../ai/jarvis.js';
 
-const MAX_JSON = 256 * 1024, MAX_UPLOAD = 7 * 1024 * 1024; // upload JSON carries a ≤5 MB CSV
+const MAX_JSON = 256 * 1024, MAX_UPLOAD = 7 * 1024 * 1024;
+const jarvis = new JarvisEngine(); // upload JSON carries a ≤5 MB CSV
 
 export async function readRaw(req: IncomingMessage, limit: number): Promise<Buffer> {
   const chunks: Buffer[] = []; let n = 0;
@@ -106,6 +108,11 @@ export async function handleCompany(co: Company, req: IncomingMessage, res: Serv
       const b = await readJson(req);
       const task = await co.submitObjective(actor, b.text, async () => co.recordTestRun(actor, await runScenarios(), 'local', null, 'AI Boss objective'));
       return ok(task);
+    }
+    if (m === 'POST' && p === '/api/co/admin/jarvis') {
+      const b = await readJson(req);
+      const result = await jarvis.execute(actor!, String(b.text ?? ''), text => co.submitObjective(actor, text, async () => co.recordTestRun(actor, await runScenarios(), 'local', null, 'JARVIS / EDITH objective')));
+      return ok(result);
     }
     if ((mm = /^\/api\/co\/admin\/approvals\/(apr_\w+)$/.exec(p)) && m === 'POST') {
       const b = await readJson(req); const r = await co.decideApproval(actor, mm[1], b.decision, b.reason);
