@@ -15,7 +15,9 @@ async function api(path, opts = {}) {
 }
 const post = (p, b) => api(p, { method: 'POST', body: JSON.stringify(b || {}) });
 let view = 'overview', flash = null, detailId = null;
-const TABS = [['overview', 'Overview'], ['orders', 'Orders'], ['objective', 'Give the AI Boss an objective'], ['cert', 'Certification'], ['products', 'Products'], ['audit', 'Audit log'], ['health', 'System health'], ['account', 'My account']];
+let jarvisHistory = [];
+const speak = text => { try { if ('speechSynthesis' in window) { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.rate = 1.02; u.pitch = 0.92; speechSynthesis.speak(u); } } catch {} };
+const TABS = [['overview', 'Overview'], ['jarvis', 'JARVIS · EDITH'], ['orders', 'Orders'], ['objective', 'Give the AI Boss an objective'], ['cert', 'Certification'], ['products', 'Products'], ['audit', 'Audit log'], ['health', 'System health'], ['account', 'My account']];
 const pillFor = s => ({ COMPLETED: 'ok', DELIVERED: 'ok', PAID: 'ok', APPROVED: 'ok', PRODUCTION_READY: 'ok', PASS: 'ok', OK: 'ok', WORKING: 'ok', IN_PRODUCTION: 'warn', QA: 'warn', TESTING: 'warn', PENDING: 'warn', AWAITING_PAYMENT: 'warn', PAYMENT_REVIEW: 'warn', REVISION: 'warn', INFO_REQUIRED: 'warn', WAITING: 'warn', IN_PROGRESS: 'warn', ASSIGNED: 'warn', REFUND_REQUESTED: 'warn', BLOCKED: 'bad', FAILED: 'bad', ESCALATED: 'bad', PAYMENT_FAILED: 'bad', REJECTED: 'bad', REFUNDED: 'bad', FAIL: 'bad', DENIED: 'bad', PAUSED: 'bad', DEGRADED: 'bad' }[s] || '');
 const pill = s => `<span class="pill ${pillFor(s)}">${esc(String(s).replace(/_/g, ' '))}</span>`;
 const say = (kind, text) => { flash = { kind, text }; };
@@ -44,6 +46,15 @@ function renderLogin() {
 }
 
 const VIEWS = {
+  async jarvis() {
+    const h = jarvisHistory.length ? jarvisHistory.map(x => `<div class="pb" style="border-bottom:1px solid var(--line)"><div class="row"><b>${x.who}</b><span class="muted mono">${esc(x.intent || '')}</span></div><p style="margin:6px 0">${esc(x.text)}</p>${x.plan ? `<div class="muted">Route: <b>${esc(x.plan.employee || 'none')}</b> · Executor: <b>EDITH</b> · Mode: ${esc(x.plan.mode)}</div><div class="muted">${x.plan.steps.map(esc).join(' → ')}</div>` : ''}</div>`).join('') : '<div class="pb muted">No commands yet. Try: “Run a security scan”, “Give me the revenue report”, “Test the workforce”, or “Check product management”.';
+    return `<h1>JARVIS · Founder AI</h1><p class="muted">JARVIS plans and routes. EDITH executes only through verified TW-01 capabilities and refuses to claim work without evidence.</p>
+      <div class="panel" style="border-color:var(--accent,#888)"><div class="pb">
+        <form id="jarvis-form"><div class="row"><input id="jarvis-text" autocomplete="off" placeholder="Talk to JARVIS… e.g. “Run a security scan”" style="flex:1 1 420px"><button class="btn p" type="submit">Execute</button><button class="btn" type="button" id="jarvis-mic">🎙 Speak</button></div></form>
+        <div class="muted" style="margin-top:8px;font-size:12px">Voice uses the browser Web Speech API when supported. Text mode always works.</div>
+      </div></div>
+      <div class="panel"><div class="ph"><h2>Command history</h2><span class="r muted">Founder-controlled</span></div>${h}</div>`;
+  },
   async account() {
     return `<h1>My account</h1><form class="panel" id="pwform" style="max-width:420px"><div class="pb" style="display:flex;flex-direction:column;gap:10px"><label class="f" for="pw-cur">Current password<input id="pw-cur" type="password" autocomplete="current-password" required></label><label class="f" for="pw-new">New password (10+ characters)<input id="pw-new" type="password" autocomplete="new-password" required></label><button class="btn p" type="submit">Change password</button><p class="muted" style="margin:0;font-size:12.5px">Other devices signed in to this account will be signed out.</p></div></form>`;
   },
@@ -117,6 +128,14 @@ document.addEventListener('click', async e => {
   const b = e.target.closest('button, a'); if (!b) return;
   try {
     if (b.dataset.tab) { view = b.dataset.tab; detailId = null; return render(); }
+    if (b.id === 'jarvis-mic') {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR) { say('bad', 'Speech recognition is not available in this browser. Use text mode.'); return render(); }
+      const r = new SR(); r.lang = 'en-IN'; r.interimResults = false; r.maxAlternatives = 1;
+      r.onresult = ev => { const text = ev.results?.[0]?.[0]?.transcript || ''; if (text) { $('#jarvis-text').value = text; $('#jarvis-form').requestSubmit(); } };
+      r.onerror = () => { say('bad', 'Microphone recognition failed. Check browser microphone permission.'); render(); };
+      r.start(); say('ok', 'Listening…'); render(); return;
+    }
     if (b.dataset.open) { e.preventDefault(); detailId = b.dataset.open; return render(); }
     if (b.hasAttribute('data-back')) { e.preventDefault(); detailId = null; view = 'orders'; return render(); }
     if (b.id === 'logout') { await post('/api/co/auth/logout').catch(() => {}); setToken(''); return render(); }
@@ -137,6 +156,12 @@ document.addEventListener('submit', async e => {
     if (e.target.id === 'login') { const r = await post('/api/co/auth/login', { email: $('#em').value, password: $('#pw').value }); setToken(r.token); view = 'overview'; return render(); }
     if (e.target.id === 'pwform') { await post('/api/co/auth/password', { current: $('#pw-cur').value, next: $('#pw-new').value }); say('ok', 'Password changed. Other sessions were signed out.'); return render(); }
     if (e.target.id === 'obj') { const t = await post('/api/co/admin/objective', { text: $('#objtext').value }); say(t.status === 'COMPLETED' ? 'ok' : 'bad', `Task ${t.id} → ${t.agent}: ${t.status}${t.errors.length ? ' — ' + t.errors.at(-1) : ''}`); return render(); }
+    if (e.target.id === 'jarvis-form') {
+      const text = $('#jarvis-text').value.trim(); if (!text) return;
+      const r = await post('/api/co/admin/jarvis', { text });
+      jarvisHistory.unshift({ who: 'JARVIS', text: r.response, intent: r.plan.intent, plan: r.plan });
+      speak(r.response); say(r.task?.status === 'COMPLETED' ? 'ok' : 'warn', r.response); return render();
+    }
   } catch (err) { say('bad', err.message); render(); }
 });
 render();
